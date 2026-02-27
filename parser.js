@@ -22,7 +22,7 @@ function parseRexxControlFlow(source) {
     const labelMatch = line.match(/^([A-Za-z0-9_.$!?@#]+)\s*:\s*(.*)$/);
     if (labelMatch) {
       currentScope = normalizeLabel(labelMatch[1]);
-      upsertNode(nodes, currentScope, currentScope, lineNo, "function");
+      defineNode(nodes, currentScope, currentScope, lineNo, "function");
 
       const trailing = collapse(labelMatch[2]);
       if (trailing) {
@@ -65,7 +65,7 @@ function processStatementBlock(text, lineNo, currentScope, nodes, edges, edgeKey
         continue;
       }
 
-      upsertNode(nodes, target, target, lineNo, "function");
+      upsertNode(nodes, target, target, lineNo, "reference");
       addEdge(edges, edgeKeys, currentScope, target, "calls", lineNo);
     }
   }
@@ -92,6 +92,20 @@ function upsertNode(nodes, id, label, line, kind) {
   }
 
   if (existing.kind !== "entry" && kind === "function") {
+    existing.kind = kind;
+  }
+}
+
+function defineNode(nodes, id, label, line, kind) {
+  const existing = nodes.get(id);
+  if (!existing) {
+    nodes.set(id, { id, label, line, kind });
+    return;
+  }
+
+  // When a true label definition is found, bind the node to that line.
+  existing.line = line;
+  if (existing.kind !== "entry") {
     existing.kind = kind;
   }
 }

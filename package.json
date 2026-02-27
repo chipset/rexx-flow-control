@@ -2,7 +2,7 @@
   "name": "rexx-control-flow",
   "displayName": "REXX Control Flow",
   "description": "Visualize and export control-flow graphs for REXX programs.",
-  "version": "0.1.3",
+  "version": "0.1.5",
   "publisher": "TMcQ",
   "repository": {
     "type": "git",

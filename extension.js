@@ -7,9 +7,11 @@ const SUPPORTED_LANGS = new Set(["rexx", "REXX"]);
 function activate(context) {
   let graphPanel = null;
   let graphDocumentUri = null;
+  let graphData = null;
 
   const renderForDocument = (doc) => {
     const graph = parseRexxControlFlow(doc.getText());
+    graphData = graph;
     if (!graphPanel) {
       graphPanel = vscode.window.createWebviewPanel(
         "rexxControlFlow",
@@ -21,6 +23,7 @@ function activate(context) {
       graphPanel.onDidDispose(() => {
         graphPanel = null;
         graphDocumentUri = null;
+        graphData = null;
       });
 
       graphPanel.webview.onDidReceiveMessage(async (msg) => {
@@ -44,6 +47,45 @@ function activate(context) {
     graphDocumentUri = doc.uri;
     graphPanel.title = `REXX Control Flow: ${path.basename(doc.fileName)}`;
     graphPanel.webview.html = renderGraphHtml(graph, doc.fileName);
+
+    const activeEditor = vscode.window.activeTextEditor;
+    if (activeEditor && activeEditor.document.uri.toString() === doc.uri.toString()) {
+      syncSelectionToGraph(activeEditor);
+    }
+  };
+
+  const getFunctionAtLine = (graph, lineNo) => {
+    if (!graph || !Array.isArray(graph.nodes)) {
+      return "MAIN";
+    }
+
+    const functionNodes = graph.nodes
+      .filter((n) => n.id !== "DYNAMIC_CALL" && (n.kind === "function" || n.kind === "entry"))
+      .sort((a, b) => a.line - b.line || a.id.localeCompare(b.id));
+
+    let selected = "MAIN";
+    for (const node of functionNodes) {
+      if (node.line <= lineNo) {
+        selected = node.id;
+      } else {
+        break;
+      }
+    }
+
+    return selected;
+  };
+
+  const syncSelectionToGraph = (editor) => {
+    if (!graphPanel || !graphDocumentUri || !graphData) {
+      return;
+    }
+    if (!editor || editor.document.uri.toString() !== graphDocumentUri.toString()) {
+      return;
+    }
+
+    const lineNo = (editor.selection?.active?.line || 0) + 1;
+    const caller = getFunctionAtLine(graphData, lineNo);
+    graphPanel.webview.postMessage({ type: "selectCaller", caller, reveal: true });
   };
 
   const show = vscode.commands.registerCommand("rexxFlow.showControlGraph", async () => {
@@ -96,7 +138,11 @@ function activate(context) {
     renderForDocument(event.document);
   });
 
-  context.subscriptions.push(show, exportJson, exportDot, onDocumentChange);
+  const onSelectionChange = vscode.window.onDidChangeTextEditorSelection((event) => {
+    syncSelectionToGraph(event.textEditor);
+  });
+
+  context.subscriptions.push(show, exportJson, exportDot, onDocumentChange, onSelectionChange);
 }
 
 function isSupported(doc) {
@@ -373,14 +419,31 @@ function renderGraphHtml(graph, fileName) {
       });
     }
 
+    function focusNodeById(nodeId) {
+      if (!nodeId) {
+        return;
+      }
+      const node = nodes.find((n) => n.getAttribute('data-node-id') === nodeId);
+      if (!node) {
+        return;
+      }
+
+      const targetX = (node.offsetLeft + node.offsetWidth / 2) * zoomScale - canvasWrap.clientWidth / 2;
+      const targetY = (node.offsetTop + node.offsetHeight / 2) * zoomScale - canvasWrap.clientHeight / 2;
+      canvasWrap.scrollTo({
+        left: Math.max(0, targetX),
+        top: Math.max(0, targetY),
+        behavior: 'smooth'
+      });
+    }
+
     nodes.forEach((node) => {
       node.addEventListener('click', () => {
         const id = node.getAttribute('data-node-id');
-        selectedCaller = selectedCaller === id ? null : id;
+        selectedCaller = id;
         applyCallerFilter();
-      });
+        focusNodeById(id);
 
-      node.addEventListener('dblclick', () => {
         const line = Number(node.getAttribute('data-line') || '1');
         vscode.postMessage({ type: 'revealLine', line });
       });
@@ -466,6 +529,20 @@ function renderGraphHtml(graph, fileName) {
         }, 'image/png');
       };
       img.src = url;
+    });
+
+    window.addEventListener('message', (event) => {
+      const msg = event && event.data;
+      if (!msg || msg.type !== 'selectCaller') {
+        return;
+      }
+      const caller = typeof msg.caller === 'string' ? msg.caller : null;
+      const exists = nodes.some((n) => n.getAttribute('data-node-id') === caller);
+      selectedCaller = exists ? caller : null;
+      applyCallerFilter();
+      if (msg.reveal && selectedCaller) {
+        focusNodeById(selectedCaller);
+      }
     });
   </script>
 </body>
