@@ -208,6 +208,30 @@ function renderGraphHtml(graph, fileName) {
       margin-bottom: 12px;
       font-size: 13px;
     }
+    .controls {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .zoom-pill {
+      margin-left: auto;
+      font-size: 12px;
+      color: var(--muted);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 4px 8px;
+      background: #fff;
+    }
+    .controls button {
+      border: 1px solid #96acbc;
+      border-radius: 8px;
+      background: #fff;
+      color: #1e3441;
+      padding: 4px 10px;
+      cursor: pointer;
+      font-size: 12px;
+    }
     .canvas {
       position: relative;
       width: ${width}px;
@@ -217,7 +241,13 @@ function renderGraphHtml(graph, fileName) {
       background: var(--card);
       overflow: auto;
     }
-    .canvas svg {
+    .graph-content {
+      position: relative;
+      width: ${width}px;
+      height: ${height}px;
+      transform-origin: 0 0;
+    }
+    .graph-content svg {
       position: absolute;
       inset: 0;
     }
@@ -294,17 +324,25 @@ function renderGraphHtml(graph, fileName) {
   <div class="wrap" id="app">
     <div class="title">REXX Call Graph</div>
     <div class="subtitle">${graphTitle}</div>
+    <div class="controls">
+      <button id="downloadSvg" type="button">Export SVG</button>
+      <button id="downloadPng" type="button">Export PNG</button>
+      <button id="resetZoom" type="button">Reset Zoom</button>
+      <div class="zoom-pill">Zoom: <span id="zoomLevel">100%</span></div>
+    </div>
 
     <div class="canvas" id="canvasWrap">
-      <svg id="graphSvg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
-        <defs>
-          <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse" markerUnits="strokeWidth">
-            <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"></path>
-          </marker>
-        </defs>
-        ${edgeSvg}
-      </svg>
-      ${nodeHtml}
+      <div class="graph-content" id="graphContent">
+        <svg id="graphSvg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+          <defs>
+            <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse" markerUnits="strokeWidth">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"></path>
+            </marker>
+          </defs>
+          ${edgeSvg}
+        </svg>
+        ${nodeHtml}
+      </div>
     </div>
   </div>
 
@@ -313,7 +351,14 @@ function renderGraphHtml(graph, fileName) {
 
     const nodes = Array.from(document.querySelectorAll('.node'));
     const edgeGroups = Array.from(document.querySelectorAll('.edge-group'));
+    const canvasWrap = document.getElementById('canvasWrap');
+    const graphContent = document.getElementById('graphContent');
+    const zoomLevel = document.getElementById('zoomLevel');
     let selectedCaller = null;
+    let zoomScale = 1;
+    const minZoom = 0.4;
+    const maxZoom = 2.5;
+    const zoomFactor = 1.12;
 
     function applyCallerFilter() {
       edgeGroups.forEach((edge) => {
@@ -341,6 +386,39 @@ function renderGraphHtml(graph, fileName) {
       });
     });
 
+    function setZoom(nextScale, clientX, clientY) {
+      const prevScale = zoomScale;
+      zoomScale = Math.max(minZoom, Math.min(maxZoom, nextScale));
+      if (zoomScale === prevScale) {
+        return;
+      }
+
+      const rect = canvasWrap.getBoundingClientRect();
+      const focusX = (clientX ?? rect.left + rect.width / 2) - rect.left + canvasWrap.scrollLeft;
+      const focusY = (clientY ?? rect.top + rect.height / 2) - rect.top + canvasWrap.scrollTop;
+
+      const worldX = focusX / prevScale;
+      const worldY = focusY / prevScale;
+
+      graphContent.style.transform = 'scale(' + zoomScale + ')';
+      zoomLevel.textContent = String(Math.round(zoomScale * 100)) + '%';
+
+      const viewportX = (clientX ?? rect.left + rect.width / 2) - rect.left;
+      const viewportY = (clientY ?? rect.top + rect.height / 2) - rect.top;
+      canvasWrap.scrollLeft = worldX * zoomScale - viewportX;
+      canvasWrap.scrollTop = worldY * zoomScale - viewportY;
+    }
+
+    canvasWrap.addEventListener('wheel', (event) => {
+      event.preventDefault();
+      const factor = event.deltaY > 0 ? 1 / zoomFactor : zoomFactor;
+      setZoom(zoomScale * factor, event.clientX, event.clientY);
+    }, { passive: false });
+
+    document.getElementById('resetZoom').addEventListener('click', () => {
+      setZoom(1);
+    });
+
     function downloadBlob(filename, blob, mime) {
       const url = URL.createObjectURL(new Blob([blob], { type: mime }));
       const anchor = document.createElement('a');
@@ -352,10 +430,42 @@ function renderGraphHtml(graph, fileName) {
       URL.revokeObjectURL(url);
     }
 
-    document.getElementById('graphSvg').addEventListener('dblclick', () => {
+    document.getElementById('downloadSvg').addEventListener('click', () => {
       const svg = document.getElementById('graphSvg');
       const serialized = new XMLSerializer().serializeToString(svg);
       downloadBlob('rexx-control-flow.svg', serialized, 'image/svg+xml');
+    });
+
+    document.getElementById('downloadPng').addEventListener('click', () => {
+      const svg = document.getElementById('graphSvg');
+      const serialized = new XMLSerializer().serializeToString(svg);
+      const svgBlob = new Blob([serialized], { type: 'image/svg+xml;charset=utf-8' });
+      const url = URL.createObjectURL(svgBlob);
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = svg.viewBox.baseVal.width || svg.clientWidth;
+        canvas.height = svg.viewBox.baseVal.height || svg.clientHeight;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0);
+        URL.revokeObjectURL(url);
+        canvas.toBlob((blob) => {
+          if (!blob) {
+            return;
+          }
+          const pngUrl = URL.createObjectURL(blob);
+          const anchor = document.createElement('a');
+          anchor.href = pngUrl;
+          anchor.download = 'rexx-control-flow.png';
+          document.body.appendChild(anchor);
+          anchor.click();
+          anchor.remove();
+          URL.revokeObjectURL(pngUrl);
+        }, 'image/png');
+      };
+      img.src = url;
     });
   </script>
 </body>
