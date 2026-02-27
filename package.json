@@ -1,0 +1,75 @@
+{
+  "name": "rexx-control-flow",
+  "displayName": "REXX Control Flow",
+  "description": "Visualize and export control-flow graphs for REXX programs.",
+  "version": "0.1.0",
+  "publisher": "local",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/chipset/CLIST-LSP.git"
+  },
+  "engines": {
+    "vscode": "^1.91.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Other"
+  ],
+  "keywords": [
+    "rexx",
+    "control flow",
+    "mainframe",
+    "graph"
+  ],
+  "activationEvents": [
+    "onLanguage:rexx",
+    "onLanguage:REXX",
+    "onCommand:rexxFlow.showControlGraph",
+    "onCommand:rexxFlow.exportGraphJson",
+    "onCommand:rexxFlow.exportDot"
+  ],
+  "icon": "images/icon.png",
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "rexxFlow.showControlGraph",
+        "category": "REXX Control Flow",
+        "title": "Generate REXX Control Flow"
+      },
+      {
+        "command": "rexxFlow.exportGraphJson",
+        "category": "REXX Control Flow",
+        "title": "Export REXX Control Flow to JSON"
+      },
+      {
+        "command": "rexxFlow.exportDot",
+        "category": "REXX Control Flow",
+        "title": "Export REXX Control Flow to DOT"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "rexxFlow.showControlGraph",
+          "group": "navigation@1",
+          "when": "editorLangId == rexx || editorLangId == REXX"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "lint": "echo 'No lint configured'",
+    "test": "node --test"
+  },
+  "files": [
+    "extension.js",
+    "parser.js",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE.md",
+    "package.json",
+    "images/icon.png"
+  ],
+  "license": "MIT"
+}
