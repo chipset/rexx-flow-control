@@ -2,7 +2,7 @@
   "name": "rexx-control-flow",
   "displayName": "REXX Control Flow",
   "description": "Visualize and export control-flow graphs for REXX programs.",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "publisher": "TMcQ",
   "repository": {
     "type": "git",
@@ -26,7 +26,8 @@
     "onLanguage:REXX",
     "onCommand:rexxFlow.showControlGraph",
     "onCommand:rexxFlow.exportGraphJson",
-    "onCommand:rexxFlow.exportDot"
+    "onCommand:rexxFlow.exportDot",
+    "onCommand:rexxFlow.exportExcalidraw"
   ],
   "icon": "images/icon.png",
   "main": "./extension.js",
@@ -46,6 +47,11 @@
         "command": "rexxFlow.exportDot",
         "category": "REXX Control Flow",
         "title": "Export REXX Control Flow to DOT"
+      },
+      {
+        "command": "rexxFlow.exportExcalidraw",
+        "category": "REXX Control Flow",
+        "title": "Export REXX Control Flow to Excalidraw"
       }
     ],
     "menus": {
@@ -54,18 +60,19 @@
           "command": "rexxFlow.showControlGraph",
           "group": "navigation@1",
           "when": "editorLangId == rexx || editorLangId == REXX"
-        },
-        {
-          "command": "rexxFlow.exportGraphJson",
-          "group": "navigation@2",
-          "when": "editorLangId == rexx || editorLangId == REXX"
-        },
-        {
-          "command": "rexxFlow.exportDot",
-          "group": "navigation@3",
-          "when": "editorLangId == rexx || editorLangId == REXX"
         }
       ]
+    },
+    "configuration": {
+      "title": "REXX Control Flow",
+      "properties": {
+        "rexxFlow.customCssFile": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Optional path to a `.css` file used to override the control-flow webview styling. Relative paths resolve from the current workspace folder.",
+          "scope": "resource"
+        }
+      }
     }
   },
   "scripts": {

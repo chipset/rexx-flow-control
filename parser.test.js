@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { parseRexxControlFlow, toDot } = require('./parser');
+const { parseRexxControlFlow, toDot, toExcalidraw } = require('./parser');
 
 function hasEdge(graph, from, to, type) {
   return graph.edges.some((e) => e.from === from && e.to === to && e.type === type);
@@ -66,10 +66,65 @@ test('finds calls nested in conditionals', () => {
   assert.ok(hasEdge(g, 'MSG', 'LOG', 'calls'));
 });
 
+test('finds direct function-style calls like Prompt(...) within procedures', () => {
+  const src = `Prompt: procedure\n  return ''\naction_loadrecord: procedure\n  mode = Prompt("Input mode (DD/USS)", inputMode)\n  return\n`;
+  const g = parseRexxControlFlow(src);
+  assert.ok(hasEdge(g, 'ACTION_LOADRECORD', 'PROMPT', 'calls'));
+});
+
+test('resolves function-style calls to labels defined later in file', () => {
+  const src = `x = Helper("abc")\nreturn\nHelper: procedure\n  return\n`;
+  const g = parseRexxControlFlow(src);
+  assert.ok(hasEdge(g, 'MAIN', 'HELPER', 'calls'));
+});
+
+test('marks SIGNAL ON NAME handlers as signal functions', () => {
+  const src = `signal on syntax name TrapSyntax\nTrapSyntax: procedure\n  return`;
+  const g = parseRexxControlFlow(src);
+  const handler = g.nodes.find((n) => n.id === 'TRAPSYNTAX');
+  assert.ok(handler);
+  assert.equal(handler.isSignalHandler, true);
+  assert.ok(hasEdge(g, 'MAIN', 'TRAPSYNTAX', 'signal-on'));
+});
+
 test('renders DOT output with expected graph header', () => {
   const g = parseRexxControlFlow('CALL A\nA: RETURN');
   const dot = toDot(g);
   assert.ok(dot.startsWith('digraph REXXControlFlow {'));
-  assert.ok(dot.includes('rankdir=LR;'));
+  assert.ok(dot.includes('rankdir=TB;'));
   assert.ok(dot.includes('"MAIN" -> "A"'));
+});
+
+test('renders Excalidraw output with bound arrows for all graph edges', () => {
+  const g = parseRexxControlFlow('CALL A\nCALL B\nA: CALL B\nB: RETURN');
+  const excalidraw = JSON.parse(toExcalidraw(g));
+
+  assert.equal(excalidraw.type, 'excalidraw');
+  assert.equal(excalidraw.version, 2);
+  assert.ok(Array.isArray(excalidraw.elements));
+
+  const rectangles = excalidraw.elements.filter((el) => el.type === 'rectangle');
+  const arrows = excalidraw.elements.filter((el) => el.type === 'arrow');
+  const texts = excalidraw.elements.filter((el) => el.type === 'text');
+  assert.equal(rectangles.length, g.nodes.length);
+  assert.equal(arrows.length, g.edges.length);
+
+  const rectIdToNodeId = new Map();
+  for (const text of texts) {
+    if (!text.containerId || !text.text) {
+      continue;
+    }
+    rectIdToNodeId.set(text.containerId, String(text.text).toUpperCase());
+  }
+
+  for (const edge of g.edges) {
+    const match = arrows.find(
+      (arrow) => {
+        const fromNode = rectIdToNodeId.get(arrow.startBinding?.elementId);
+        const toNode = rectIdToNodeId.get(arrow.endBinding?.elementId);
+        return fromNode === edge.from && toNode === edge.to;
+      }
+    );
+    assert.ok(match, `missing bound arrow for ${edge.from} -> ${edge.to}`);
+  }
 });

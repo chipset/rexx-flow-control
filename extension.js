@@ -1,6 +1,8 @@
 const vscode = require("vscode");
+const fs = require("node:fs/promises");
+const os = require("node:os");
 const path = require("node:path");
-const { parseRexxControlFlow, toDot } = require("./parser");
+const { parseRexxControlFlow, toDot, toExcalidraw } = require("./parser");
 
 const SUPPORTED_LANGS = new Set(["rexx", "REXX"]);
 
@@ -8,9 +10,53 @@ function activate(context) {
   let graphPanel = null;
   let graphDocumentUri = null;
   let graphData = null;
+  let cssWarningKey = null;
+  let renderTimer = null;
+  let renderNonce = 0;
 
-  const renderForDocument = (doc) => {
+  const loadCustomCssForDocument = async (doc) => {
+    const configuredPath = String(
+      vscode.workspace.getConfiguration("rexxFlow").get("customCssFile", "")
+    ).trim();
+    if (!configuredPath) {
+      cssWarningKey = null;
+      return "";
+    }
+
+    const expandedPath = configuredPath.startsWith("~")
+      ? path.join(os.homedir(), configuredPath.slice(1))
+      : configuredPath;
+
+    let resolvedPath = expandedPath;
+    if (!path.isAbsolute(resolvedPath)) {
+      const workspaceFolder = vscode.workspace.getWorkspaceFolder(doc.uri);
+      const basePath = workspaceFolder?.uri.fsPath || path.dirname(doc.fileName);
+      resolvedPath = path.resolve(basePath, resolvedPath);
+    }
+
+    try {
+      const css = await fs.readFile(resolvedPath, "utf8");
+      cssWarningKey = null;
+      return css;
+    } catch (err) {
+      const key = `${configuredPath}:${err?.code || "ERR"}`;
+      if (cssWarningKey !== key) {
+        cssWarningKey = key;
+        vscode.window.showWarningMessage(
+          `REXX Control Flow: Unable to load custom CSS file "${configuredPath}".`
+        );
+      }
+      return "";
+    }
+  };
+
+  const renderForDocument = async (doc) => {
+    const currentNonce = ++renderNonce;
     const graph = parseRexxControlFlow(doc.getText());
+    const customCss = await loadCustomCssForDocument(doc);
+    if (currentNonce !== renderNonce) {
+      return;
+    }
     graphData = graph;
     if (!graphPanel) {
       graphPanel = vscode.window.createWebviewPanel(
@@ -21,6 +67,10 @@ function activate(context) {
       );
 
       graphPanel.onDidDispose(() => {
+        if (renderTimer) {
+          clearTimeout(renderTimer);
+          renderTimer = null;
+        }
         graphPanel = null;
         graphDocumentUri = null;
         graphData = null;
@@ -40,18 +90,59 @@ function activate(context) {
           const range = new vscode.Range(position, position);
           editor.selection = new vscode.Selection(position, position);
           editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
+          return;
+        }
+
+        const docTarget = await vscode.workspace.openTextDocument(graphDocumentUri);
+        if (!isSupported(docTarget)) {
+          return;
+        }
+
+        if (msg.type === "exportGraphJson") {
+          await exportJsonFromDocument(docTarget);
+          return;
+        }
+
+        if (msg.type === "exportDot") {
+          await exportDotFromDocument(docTarget);
+          return;
+        }
+
+        if (msg.type === "exportExcalidraw") {
+          await exportExcalidrawFromDocument(docTarget);
+          return;
+        }
+
+        if (msg.type === "exportSvg" && typeof msg.svg === "string") {
+          await exportSvgFromDocument(docTarget, msg.svg);
+          return;
+        }
+
+        if (msg.type === "exportPng" && typeof msg.png === "string") {
+          await exportPngFromDocument(docTarget, msg.png);
         }
       });
     }
 
     graphDocumentUri = doc.uri;
     graphPanel.title = `REXX Control Flow: ${path.basename(doc.fileName)}`;
-    graphPanel.webview.html = renderGraphHtml(graph, doc.fileName);
+    graphPanel.webview.html = renderGraphHtml(graph, doc.fileName, customCss);
 
     const activeEditor = vscode.window.activeTextEditor;
     if (activeEditor && activeEditor.document.uri.toString() === doc.uri.toString()) {
       syncSelectionToGraph(activeEditor);
     }
+  };
+
+  const scheduleRender = (doc, delayMs = 120) => {
+    if (renderTimer) {
+      clearTimeout(renderTimer);
+      renderTimer = null;
+    }
+    renderTimer = setTimeout(() => {
+      renderTimer = null;
+      void renderForDocument(doc);
+    }, delayMs);
   };
 
   const getFunctionAtLine = (graph, lineNo) => {
@@ -88,6 +179,83 @@ function activate(context) {
     graphPanel.webview.postMessage({ type: "selectCaller", caller, reveal: true });
   };
 
+  const getDefaultExportUri = (doc, extension) => {
+    const safeExt = String(extension || "").replace(/^\./, "");
+    const sourceName = path.basename(doc.fileName || "rexx-control-flow");
+    const baseName = path.basename(sourceName, path.extname(sourceName));
+    const defaultDir = path.dirname(doc.fileName || "");
+    const defaultName = `${baseName}.${safeExt}`;
+    if (defaultDir && defaultDir !== ".") {
+      return vscode.Uri.file(path.join(defaultDir, defaultName));
+    }
+    return vscode.Uri.file(path.join(os.homedir(), defaultName));
+  };
+
+  const writeExportFile = async (doc, extension, data, filters) => {
+    const uri = await vscode.window.showSaveDialog({
+      defaultUri: getDefaultExportUri(doc, extension),
+      filters: filters || undefined
+    });
+    if (!uri) {
+      return null;
+    }
+    const payload = Buffer.isBuffer(data) ? data : Buffer.from(String(data), "utf8");
+    await fs.writeFile(uri.fsPath, payload);
+    return uri;
+  };
+
+  const exportJsonFromDocument = async (doc) => {
+    const graph = parseRexxControlFlow(doc.getText());
+    const uri = await writeExportFile(
+      doc,
+      "json",
+      JSON.stringify(graph, null, 2),
+      { JSON: ["json"] }
+    );
+    if (!uri) {
+      return;
+    }
+    const target = await vscode.workspace.openTextDocument(uri);
+    await vscode.window.showTextDocument(target, vscode.ViewColumn.Beside);
+  };
+
+  const exportDotFromDocument = async (doc) => {
+    const graph = parseRexxControlFlow(doc.getText());
+    const uri = await writeExportFile(doc, "dot", toDot(graph), { "Graphviz DOT": ["dot"] });
+    if (!uri) {
+      return;
+    }
+    const target = await vscode.workspace.openTextDocument(uri);
+    await vscode.window.showTextDocument(target, vscode.ViewColumn.Beside);
+  };
+
+  const exportExcalidrawFromDocument = async (doc) => {
+    const graph = parseRexxControlFlow(doc.getText());
+    const uri = await writeExportFile(
+      doc,
+      "excalidraw",
+      toExcalidraw(graph),
+      { Excalidraw: ["excalidraw"] }
+    );
+    if (!uri) {
+      return;
+    }
+    const target = await vscode.workspace.openTextDocument(uri);
+    await vscode.window.showTextDocument(target, vscode.ViewColumn.Beside);
+  };
+
+  const exportSvgFromDocument = async (doc, svgText) => {
+    await writeExportFile(doc, "svg", svgText, { SVG: ["svg"] });
+  };
+
+  const exportPngFromDocument = async (doc, pngDataUrl) => {
+    const clean = String(pngDataUrl || "").replace(/^data:image\/png;base64,/, "");
+    if (!clean) {
+      return;
+    }
+    await writeExportFile(doc, "png", Buffer.from(clean, "base64"), { PNG: ["png"] });
+  };
+
   const show = vscode.commands.registerCommand("rexxFlow.showControlGraph", async () => {
     const editor = vscode.window.activeTextEditor;
     if (!editor || !isSupported(editor.document)) {
@@ -95,7 +263,7 @@ function activate(context) {
       return;
     }
 
-    renderForDocument(editor.document);
+    await renderForDocument(editor.document);
   });
 
   const exportJson = vscode.commands.registerCommand("rexxFlow.exportGraphJson", async () => {
@@ -105,12 +273,7 @@ function activate(context) {
       return;
     }
 
-    const graph = parseRexxControlFlow(editor.document.getText());
-    const doc = await vscode.workspace.openTextDocument({
-      content: JSON.stringify(graph, null, 2),
-      language: "json"
-    });
-    await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
+    await exportJsonFromDocument(editor.document);
   });
 
   const exportDot = vscode.commands.registerCommand("rexxFlow.exportDot", async () => {
@@ -120,12 +283,17 @@ function activate(context) {
       return;
     }
 
-    const graph = parseRexxControlFlow(editor.document.getText());
-    const doc = await vscode.workspace.openTextDocument({
-      content: toDot(graph),
-      language: "dot"
-    });
-    await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
+    await exportDotFromDocument(editor.document);
+  });
+
+  const exportExcalidraw = vscode.commands.registerCommand("rexxFlow.exportExcalidraw", async () => {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor || !isSupported(editor.document)) {
+      vscode.window.showWarningMessage("Open a REXX file to export control flow.");
+      return;
+    }
+
+    await exportExcalidrawFromDocument(editor.document);
   });
 
   const onDocumentChange = vscode.workspace.onDidChangeTextDocument((event) => {
@@ -135,14 +303,49 @@ function activate(context) {
     if (event.document.uri.toString() !== graphDocumentUri.toString()) {
       return;
     }
-    renderForDocument(event.document);
+    scheduleRender(event.document);
+  });
+
+  const onDocumentSave = vscode.workspace.onDidSaveTextDocument((doc) => {
+    if (!graphPanel || !graphDocumentUri) {
+      return;
+    }
+    if (doc.uri.toString() !== graphDocumentUri.toString()) {
+      return;
+    }
+    scheduleRender(doc, 0);
   });
 
   const onSelectionChange = vscode.window.onDidChangeTextEditorSelection((event) => {
     syncSelectionToGraph(event.textEditor);
   });
 
-  context.subscriptions.push(show, exportJson, exportDot, onDocumentChange, onSelectionChange);
+  const onConfigChange = vscode.workspace.onDidChangeConfiguration(async (event) => {
+    if (!event.affectsConfiguration("rexxFlow.customCssFile")) {
+      return;
+    }
+    if (!graphPanel || !graphDocumentUri) {
+      return;
+    }
+
+    try {
+      const doc = await vscode.workspace.openTextDocument(graphDocumentUri);
+      await renderForDocument(doc);
+    } catch {
+      // Ignore if the document can no longer be opened.
+    }
+  });
+
+  context.subscriptions.push(
+    show,
+    exportJson,
+    exportDot,
+    exportExcalidraw,
+    onDocumentChange,
+    onDocumentSave,
+    onSelectionChange,
+    onConfigChange
+  );
 }
 
 function isSupported(doc) {
@@ -153,7 +356,94 @@ function isSupported(doc) {
   return name.endsWith(".rexx") || name.endsWith(".rex") || name.endsWith(".exec");
 }
 
-function renderGraphHtml(graph, fileName) {
+function buildNorthSouthLayers(nodes, edges) {
+  const orderedNodes = Array.isArray(nodes)
+    ? [...nodes].sort((a, b) => {
+        if (a.id === "MAIN") {
+          return -1;
+        }
+        if (b.id === "MAIN") {
+          return 1;
+        }
+        return a.line - b.line || a.id.localeCompare(b.id);
+      })
+    : [];
+
+  const knownIds = new Set(orderedNodes.map((node) => node.id));
+  const outgoing = new Map();
+  for (const node of orderedNodes) {
+    outgoing.set(node.id, []);
+  }
+
+  for (const edge of Array.isArray(edges) ? edges : []) {
+    if (!knownIds.has(edge.from) || !knownIds.has(edge.to)) {
+      continue;
+    }
+    outgoing.get(edge.from).push(edge.to);
+  }
+
+  const layerById = new Map();
+  if (knownIds.has("MAIN")) {
+    layerById.set("MAIN", 0);
+    const queue = ["MAIN"];
+    for (let i = 0; i < queue.length; i += 1) {
+      const fromId = queue[i];
+      const fromLayer = layerById.get(fromId) || 0;
+      for (const toId of outgoing.get(fromId) || []) {
+        if (!layerById.has(toId)) {
+          layerById.set(toId, fromLayer + 1);
+          queue.push(toId);
+        }
+      }
+    }
+  }
+
+  let maxLayer = 0;
+  for (const layer of layerById.values()) {
+    maxLayer = Math.max(maxLayer, layer);
+  }
+  for (const node of orderedNodes) {
+    if (!layerById.has(node.id)) {
+      maxLayer += 1;
+      layerById.set(node.id, maxLayer);
+    }
+  }
+
+  for (let pass = 0; pass < 2; pass += 1) {
+    for (const edge of Array.isArray(edges) ? edges : []) {
+      if (edge.from === edge.to || edge.to === "MAIN") {
+        continue;
+      }
+      const fromLayer = layerById.get(edge.from);
+      const toLayer = layerById.get(edge.to);
+      if (typeof fromLayer !== "number" || typeof toLayer !== "number") {
+        continue;
+      }
+      if (toLayer <= fromLayer) {
+        layerById.set(edge.to, fromLayer + 1);
+      }
+    }
+  }
+
+  const byLayer = new Map();
+  for (const node of orderedNodes) {
+    const layer = layerById.get(node.id) || 0;
+    if (!byLayer.has(layer)) {
+      byLayer.set(layer, []);
+    }
+    byLayer.get(layer).push(node);
+  }
+
+  return Array.from(byLayer.entries())
+    .sort((a, b) => a[0] - b[0])
+    .map(([, layerNodes]) => layerNodes);
+}
+
+function sanitizeCss(cssText) {
+  return String(cssText || "").replace(/<\/style/gi, "<\\/style");
+}
+
+function renderGraphHtml(graph, fileName, customCss = "") {
   const nodes = graph.nodes;
   const edges = graph.edges;
   const edgeColorByTarget = buildEdgeColorMap(nodes, edges);
@@ -162,20 +452,24 @@ function renderGraphHtml(graph, fileName) {
   const cardHeight = 56;
   const gapX = 60;
   const gapY = 56;
-  const cols = Math.max(3, Math.ceil(Math.sqrt(Math.max(nodes.length, 1))));
+  const margin = 30;
+  const layers = buildNorthSouthLayers(nodes, edges);
+  const cols = Math.max(1, ...layers.map((layer) => layer.length));
 
   const positions = new Map();
-  nodes.forEach((node, idx) => {
-    const col = idx % cols;
-    const row = Math.floor(idx / cols);
-    const x = 30 + col * (cardWidth + gapX);
-    const y = 30 + row * (cardHeight + gapY);
-    positions.set(node.id, { x, y });
+  layers.forEach((layer, row) => {
+    const rowWidth = layer.length * cardWidth + Math.max(0, layer.length - 1) * gapX;
+    const xStart = margin + Math.max(0, Math.round((cols * (cardWidth + gapX) - gapX - rowWidth) / 2));
+    layer.forEach((node, col) => {
+      const x = xStart + col * (cardWidth + gapX);
+      const y = margin + row * (cardHeight + gapY);
+      positions.set(node.id, { x, y });
+    });
   });
 
-  const totalRows = Math.ceil(nodes.length / cols);
-  const width = Math.max(720, 60 + cols * (cardWidth + gapX));
-  const height = Math.max(420, 60 + totalRows * (cardHeight + gapY));
+  const totalRows = layers.length;
+  const width = Math.max(720, margin * 2 + cols * cardWidth + Math.max(0, cols - 1) * gapX);
+  const height = Math.max(420, margin * 2 + totalRows * cardHeight + Math.max(0, totalRows - 1) * gapY);
 
   const edgeSvg = edges
     .map((edge) => {
@@ -218,6 +512,8 @@ function renderGraphHtml(graph, fileName) {
     .join("\n");
 
   const graphTitle = `${escapeHtml(fileName)} | Functions: ${nodes.length} | Calls: ${edges.length}`;
+
+  const customCssBlock = customCss ? `\n  <style id="user-css">\n${sanitizeCss(customCss)}\n  </style>` : "";
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -313,7 +609,7 @@ function renderGraphHtml(graph, fileName) {
     }
     .edge-group.dimmed .edge,
     .edge-group.dimmed .edge-label {
-      opacity: 0.12;
+      opacity: 0.3;
     }
     .edge-group.active .edge {
       opacity: 1;
@@ -343,6 +639,17 @@ function renderGraphHtml(graph, fileName) {
       border-color: #1f4f6a;
       box-shadow: 0 0 0 2px rgba(31, 79, 106, 0.18), 0 1px 3px rgba(26, 44, 61, 0.08);
     }
+    .node.signal-handler {
+      border-color: #b42318;
+      background: #fff1f0;
+    }
+    .node.signal-handler .name {
+      color: #b42318;
+    }
+    .node.signal-handler.selected {
+      border-color: #8f1d14;
+      box-shadow: 0 0 0 2px rgba(180, 35, 24, 0.24), 0 1px 3px rgba(26, 44, 61, 0.08);
+    }
     .node .name {
       font-weight: 700;
       font-size: 13px;
@@ -364,13 +671,16 @@ function renderGraphHtml(graph, fileName) {
     .node.kind-dynamic-jump {
       background: #f4f8fb;
     }
-  </style>
+  </style>${customCssBlock}
 </head>
 <body>
   <div class="wrap" id="app">
     <div class="title">REXX Call Graph</div>
     <div class="subtitle">${graphTitle}</div>
     <div class="controls">
+      <button id="exportJson" type="button">Export JSON</button>
+      <button id="exportDot" type="button">Export DOT</button>
+      <button id="exportExcalidraw" type="button">Export Excalidraw</button>
       <button id="downloadSvg" type="button">Export SVG</button>
       <button id="downloadPng" type="button">Export PNG</button>
       <button id="resetZoom" type="button">Reset Zoom</button>
@@ -407,9 +717,14 @@ function renderGraphHtml(graph, fileName) {
     const zoomFactor = 1.12;
 
     function applyCallerFilter() {
+      const hasOutgoing = selectedCaller
+        ? edgeGroups.some((edge) => edge.getAttribute('data-from') === selectedCaller)
+        : false;
+
       edgeGroups.forEach((edge) => {
         const from = edge.getAttribute('data-from');
-        const isActive = !selectedCaller || from === selectedCaller;
+        const to = edge.getAttribute('data-to');
+        const isActive = !selectedCaller || (hasOutgoing ? from === selectedCaller : to === selectedCaller);
         edge.classList.toggle('active', Boolean(selectedCaller && isActive));
         edge.classList.toggle('dimmed', Boolean(selectedCaller && !isActive));
       });
@@ -482,21 +797,22 @@ function renderGraphHtml(graph, fileName) {
       setZoom(1);
     });
 
-    function downloadBlob(filename, blob, mime) {
-      const url = URL.createObjectURL(new Blob([blob], { type: mime }));
-      const anchor = document.createElement('a');
-      anchor.href = url;
-      anchor.download = filename;
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-      URL.revokeObjectURL(url);
-    }
-
     document.getElementById('downloadSvg').addEventListener('click', () => {
       const svg = document.getElementById('graphSvg');
       const serialized = new XMLSerializer().serializeToString(svg);
-      downloadBlob('rexx-control-flow.svg', serialized, 'image/svg+xml');
+      vscode.postMessage({ type: 'exportSvg', svg: serialized });
+    });
+
+    document.getElementById('exportJson').addEventListener('click', () => {
+      vscode.postMessage({ type: 'exportGraphJson' });
+    });
+
+    document.getElementById('exportDot').addEventListener('click', () => {
+      vscode.postMessage({ type: 'exportDot' });
+    });
+
+    document.getElementById('exportExcalidraw').addEventListener('click', () => {
+      vscode.postMessage({ type: 'exportExcalidraw' });
     });
 
     document.getElementById('downloadPng').addEventListener('click', () => {
@@ -514,19 +830,8 @@ function renderGraphHtml(graph, fileName) {
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         ctx.drawImage(img, 0, 0);
         URL.revokeObjectURL(url);
-        canvas.toBlob((blob) => {
-          if (!blob) {
-            return;
-          }
-          const pngUrl = URL.createObjectURL(blob);
-          const anchor = document.createElement('a');
-          anchor.href = pngUrl;
-          anchor.download = 'rexx-control-flow.png';
-          document.body.appendChild(anchor);
-          anchor.click();
-          anchor.remove();
-          URL.revokeObjectURL(pngUrl);
-        }, 'image/png');
+        const png = canvas.toDataURL('image/png');
+        vscode.postMessage({ type: 'exportPng', png });
       };
       img.src = url;
     });
@@ -550,11 +855,15 @@ function renderGraphHtml(graph, fileName) {
 }
 
 function nodeClassName(node) {
+  const classes = [];
   const kind = (node.kind || "").toLowerCase();
-  if (!kind) {
-    return "";
+  if (kind) {
+    classes.push(`kind-${kind.replace(/[^a-z0-9_-]/g, "-")}`);
   }
-  return `kind-${kind.replace(/[^a-z0-9_-]/g, "-")}`;
+  if (node.isSignalHandler) {
+    classes.push("signal-handler");
+  }
+  return classes.join(" ");
 }
 
 function edgeClassNames(edge) {
