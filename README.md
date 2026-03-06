@@ -14,9 +14,13 @@ REXX Control Flow is a VS Code extension that builds and visualizes a function-l
   - If selected function has no outgoing calls, incoming call lines are highlighted.
 - Signal handlers are visually distinct:
   - `SIGNAL ON ... NAME handler` targets are shown as red boxes.
+- Unused procedures are highlighted
+  - Shows procedures not used
 - Built-in graph navigation tools:
   - Scroll/trackpad zoom in the graph canvas.
   - Reset zoom button.
+  - Updated panning routine using mouse
+  - Adjusted view canvase
   - JSON, DOT, Excalidraw, SVG, and PNG export buttons in the graph view.
 - Export call graph data:
   - JSON export.

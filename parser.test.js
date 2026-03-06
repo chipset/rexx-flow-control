@@ -85,6 +85,7 @@ test('marks SIGNAL ON NAME handlers as signal functions', () => {
   assert.ok(handler);
   assert.equal(handler.isSignalHandler, true);
   assert.ok(hasEdge(g, 'MAIN', 'TRAPSYNTAX', 'signal-on'));
+  assert.equal(handler.line, 2);
 });
 
 test('renders DOT output with expected graph header', () => {

@@ -447,6 +447,12 @@ function renderGraphHtml(graph, fileName, customCss = "") {
   const nodes = graph.nodes;
   const edges = graph.edges;
   const edgeColorByTarget = buildEdgeColorMap(nodes, edges);
+  const calledTargets = new Set(edges.map((e) => e.to));
+  const uncalledFunctionIds = new Set(
+    nodes
+      .filter((n) => n.id !== "MAIN" && n.kind === "function" && !calledTargets.has(n.id))
+      .map((n) => n.id)
+  );
 
   const cardWidth = 170;
   const cardHeight = 56;
@@ -503,7 +509,7 @@ function renderGraphHtml(graph, fileName, customCss = "") {
   const nodeHtml = nodes
     .map((node) => {
       const pos = positions.get(node.id);
-      return `<button class="node ${nodeClassName(node)}" data-line="${node.line}" data-kind="${escapeHtml(
+      return `<button class="node ${nodeClassName(node, uncalledFunctionIds.has(node.id))}" data-line="${node.line}" data-kind="${escapeHtml(
         node.kind || ""
       )}" data-node-id="${escapeHtml(node.id)}" style="left:${pos.x}px;top:${pos.y}px" title="Click to filter calls, double-click to jump to line ${node.line}"><div class="name">${escapeHtml(
         node.label
@@ -530,6 +536,9 @@ function renderGraphHtml(graph, fileName, customCss = "") {
       --muted: #5f7380;
       --accent: #cc3f0c;
       --border: #d7e0e8;
+      --uncalled-bg: #fff36a;
+      --uncalled-border: #c9a800;
+      --uncalled-text: #5c4a00;
     }
     body {
       margin: 0;
@@ -574,14 +583,28 @@ function renderGraphHtml(graph, fileName, customCss = "") {
       cursor: pointer;
       font-size: 12px;
     }
+    .controls select {
+      border: 1px solid #96acbc;
+      border-radius: 8px;
+      background: #fff;
+      color: #1e3441;
+      padding: 4px 8px;
+      font-size: 12px;
+    }
     .canvas {
       position: relative;
-      width: ${width}px;
-      height: ${height}px;
+      width: 100%;
+      height: min(78vh, calc(100vh - 190px));
+      min-height: 360px;
       border: 1px solid var(--border);
       border-radius: 12px;
       background: var(--card);
       overflow: auto;
+      cursor: grab;
+    }
+    .canvas.panning {
+      cursor: grabbing;
+      user-select: none;
     }
     .graph-content {
       position: relative;
@@ -650,6 +673,13 @@ function renderGraphHtml(graph, fileName, customCss = "") {
       border-color: #8f1d14;
       box-shadow: 0 0 0 2px rgba(180, 35, 24, 0.24), 0 1px 3px rgba(26, 44, 61, 0.08);
     }
+    .node.uncalled {
+      border-color: var(--uncalled-border);
+      background: var(--uncalled-bg) !important;
+    }
+    .node.uncalled .name {
+      color: var(--uncalled-text);
+    }
     .node .name {
       font-weight: 700;
       font-size: 13px;
@@ -683,6 +713,16 @@ function renderGraphHtml(graph, fileName, customCss = "") {
       <button id="exportExcalidraw" type="button">Export Excalidraw</button>
       <button id="downloadSvg" type="button">Export SVG</button>
       <button id="downloadPng" type="button">Export PNG</button>
+      <button id="zoomOut" type="button">-</button>
+      <button id="zoomIn" type="button">+</button>
+      <select id="zoomPreset" title="Zoom level">
+        <option value="50">50%</option>
+        <option value="75">75%</option>
+        <option value="100" selected>100%</option>
+        <option value="125">125%</option>
+        <option value="150">150%</option>
+        <option value="200">200%</option>
+      </select>
       <button id="resetZoom" type="button">Reset Zoom</button>
       <div class="zoom-pill">Zoom: <span id="zoomLevel">100%</span></div>
     </div>
@@ -710,11 +750,17 @@ function renderGraphHtml(graph, fileName, customCss = "") {
     const canvasWrap = document.getElementById('canvasWrap');
     const graphContent = document.getElementById('graphContent');
     const zoomLevel = document.getElementById('zoomLevel');
+    const zoomPreset = document.getElementById('zoomPreset');
     let selectedCaller = null;
     let zoomScale = 1;
     const minZoom = 0.4;
     const maxZoom = 2.5;
     const zoomFactor = 1.12;
+    let isPanning = false;
+    let panStartX = 0;
+    let panStartY = 0;
+    let panStartScrollLeft = 0;
+    let panStartScrollTop = 0;
 
     function applyCallerFilter() {
       const hasOutgoing = selectedCaller
@@ -780,11 +826,40 @@ function renderGraphHtml(graph, fileName, customCss = "") {
 
       graphContent.style.transform = 'scale(' + zoomScale + ')';
       zoomLevel.textContent = String(Math.round(zoomScale * 100)) + '%';
+      if (zoomPreset) {
+        const percent = String(Math.round(zoomScale * 100));
+        const hasOption = Array.from(zoomPreset.options).some((o) => o.value === percent);
+        if (hasOption) {
+          zoomPreset.value = percent;
+        }
+      }
 
       const viewportX = (clientX ?? rect.left + rect.width / 2) - rect.left;
       const viewportY = (clientY ?? rect.top + rect.height / 2) - rect.top;
       canvasWrap.scrollLeft = worldX * zoomScale - viewportX;
       canvasWrap.scrollTop = worldY * zoomScale - viewportY;
+    }
+
+    function fitGraphToViewport() {
+      const svg = document.getElementById('graphSvg');
+      if (!svg) {
+        return;
+      }
+      const graphWidth = svg.viewBox.baseVal.width || svg.clientWidth;
+      const graphHeight = svg.viewBox.baseVal.height || svg.clientHeight;
+      if (!graphWidth || !graphHeight || !canvasWrap.clientWidth || !canvasWrap.clientHeight) {
+        return;
+      }
+
+      const scaleX = canvasWrap.clientWidth / graphWidth;
+      const scaleY = canvasWrap.clientHeight / graphHeight;
+      const fitScale = Math.max(minZoom, Math.min(maxZoom, Math.min(scaleX, scaleY)));
+      setZoom(fitScale);
+
+      const scaledWidth = graphWidth * zoomScale;
+      const scaledHeight = graphHeight * zoomScale;
+      canvasWrap.scrollLeft = Math.max(0, (scaledWidth - canvasWrap.clientWidth) / 2);
+      canvasWrap.scrollTop = Math.max(0, (scaledHeight - canvasWrap.clientHeight) / 2);
     }
 
     canvasWrap.addEventListener('wheel', (event) => {
@@ -794,12 +869,69 @@ function renderGraphHtml(graph, fileName, customCss = "") {
     }, { passive: false });
 
     document.getElementById('resetZoom').addEventListener('click', () => {
-      setZoom(1);
+      fitGraphToViewport();
+    });
+    document.getElementById('zoomIn').addEventListener('click', () => {
+      setZoom(zoomScale * zoomFactor);
+    });
+    document.getElementById('zoomOut').addEventListener('click', () => {
+      setZoom(zoomScale / zoomFactor);
+    });
+    if (zoomPreset) {
+      zoomPreset.addEventListener('change', (event) => {
+        const raw = Number(event.target && event.target.value);
+        if (!Number.isFinite(raw) || raw <= 0) {
+          return;
+        }
+        setZoom(raw / 100);
+      });
+    }
+
+    canvasWrap.addEventListener('mousedown', (event) => {
+      if (event.button !== 0) {
+        return;
+      }
+      if (event.target && event.target.closest('.node')) {
+        return;
+      }
+      isPanning = true;
+      panStartX = event.clientX;
+      panStartY = event.clientY;
+      panStartScrollLeft = canvasWrap.scrollLeft;
+      panStartScrollTop = canvasWrap.scrollTop;
+      canvasWrap.classList.add('panning');
+    });
+
+    window.addEventListener('mousemove', (event) => {
+      if (!isPanning) {
+        return;
+      }
+      const dx = event.clientX - panStartX;
+      const dy = event.clientY - panStartY;
+      canvasWrap.scrollLeft = panStartScrollLeft - dx;
+      canvasWrap.scrollTop = panStartScrollTop - dy;
+    });
+
+    window.addEventListener('mouseup', () => {
+      if (!isPanning) {
+        return;
+      }
+      isPanning = false;
+      canvasWrap.classList.remove('panning');
+    });
+
+    let fitTimer = null;
+    window.addEventListener('resize', () => {
+      if (fitTimer) {
+        clearTimeout(fitTimer);
+      }
+      fitTimer = setTimeout(() => {
+        fitGraphToViewport();
+      }, 120);
     });
 
     document.getElementById('downloadSvg').addEventListener('click', () => {
-      const svg = document.getElementById('graphSvg');
-      const serialized = new XMLSerializer().serializeToString(svg);
+      const serialized = buildExportSvgString();
       vscode.postMessage({ type: 'exportSvg', svg: serialized });
     });
 
@@ -817,7 +949,7 @@ function renderGraphHtml(graph, fileName, customCss = "") {
 
     document.getElementById('downloadPng').addEventListener('click', () => {
       const svg = document.getElementById('graphSvg');
-      const serialized = new XMLSerializer().serializeToString(svg);
+      const serialized = buildExportSvgString();
       const svgBlob = new Blob([serialized], { type: 'image/svg+xml;charset=utf-8' });
       const url = URL.createObjectURL(svgBlob);
       const img = new Image();
@@ -836,6 +968,58 @@ function renderGraphHtml(graph, fileName, customCss = "") {
       img.src = url;
     });
 
+    function buildExportSvgString() {
+      const svg = document.getElementById('graphSvg');
+      const clone = svg.cloneNode(true);
+      const ns = 'http://www.w3.org/2000/svg';
+      const exportNodes = document.createElementNS(ns, 'g');
+      exportNodes.setAttribute('id', 'exportNodes');
+
+      nodes.forEach((node) => {
+        const x = Number(node.style.left.replace('px', '')) || node.offsetLeft || 0;
+        const y = Number(node.style.top.replace('px', '')) || node.offsetTop || 0;
+        const width = node.offsetWidth || ${cardWidth};
+        const height = node.offsetHeight || ${cardHeight};
+        const isSignal = node.classList.contains('signal-handler');
+
+        const rect = document.createElementNS(ns, 'rect');
+        rect.setAttribute('x', String(x));
+        rect.setAttribute('y', String(y));
+        rect.setAttribute('width', String(width));
+        rect.setAttribute('height', String(height));
+        rect.setAttribute('rx', '8');
+        rect.setAttribute('ry', '8');
+        rect.setAttribute('fill', isSignal ? '#fff1f0' : '#ffffff');
+        rect.setAttribute('stroke', isSignal ? '#b42318' : '#b8cad8');
+        rect.setAttribute('stroke-width', '1');
+        exportNodes.appendChild(rect);
+
+        const nameEl = node.querySelector('.name');
+        const metaEl = node.querySelector('.meta');
+        const nameText = document.createElementNS(ns, 'text');
+        nameText.setAttribute('x', String(x + 10));
+        nameText.setAttribute('y', String(y + 20));
+        nameText.setAttribute('font-size', '13');
+        nameText.setAttribute('font-weight', '700');
+        nameText.setAttribute('font-family', 'Segoe UI, Arial, sans-serif');
+        nameText.setAttribute('fill', isSignal ? '#b42318' : '#cc3f0c');
+        nameText.textContent = (nameEl && nameEl.textContent) ? nameEl.textContent : '';
+        exportNodes.appendChild(nameText);
+
+        const metaText = document.createElementNS(ns, 'text');
+        metaText.setAttribute('x', String(x + 10));
+        metaText.setAttribute('y', String(y + 38));
+        metaText.setAttribute('font-size', '11');
+        metaText.setAttribute('font-family', 'Segoe UI, Arial, sans-serif');
+        metaText.setAttribute('fill', '#5f7380');
+        metaText.textContent = (metaEl && metaEl.textContent) ? metaEl.textContent : '';
+        exportNodes.appendChild(metaText);
+      });
+
+      clone.appendChild(exportNodes);
+      return new XMLSerializer().serializeToString(clone);
+    }
+
     window.addEventListener('message', (event) => {
       const msg = event && event.data;
       if (!msg || msg.type !== 'selectCaller') {
@@ -849,16 +1033,24 @@ function renderGraphHtml(graph, fileName, customCss = "") {
         focusNodeById(selectedCaller);
       }
     });
+
+    // Initial fit so graph starts sized to the visible panel area.
+    requestAnimationFrame(() => {
+      fitGraphToViewport();
+    });
   </script>
 </body>
 </html>`;
 }
 
-function nodeClassName(node) {
+function nodeClassName(node, isUncalled) {
   const classes = [];
   const kind = (node.kind || "").toLowerCase();
   if (kind) {
     classes.push(`kind-${kind.replace(/[^a-z0-9_-]/g, "-")}`);
+  }
+  if (isUncalled) {
+    classes.push("uncalled");
   }
   if (node.isSignalHandler) {
     classes.push("signal-handler");

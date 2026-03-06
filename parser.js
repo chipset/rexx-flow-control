@@ -130,7 +130,8 @@ function upsertNode(nodes, id, label, line, kind) {
     return;
   }
 
-  if (line < existing.line) {
+  // Preserve definition locations for real functions/entry points.
+  if (line < existing.line && existing.kind !== "function" && existing.kind !== "entry") {
     existing.line = line;
   }
 
