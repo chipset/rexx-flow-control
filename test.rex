@@ -187,12 +187,18 @@ Log: procedure expose logMode logDD logUSS
   end
   else do
     /* USS logging (optional). Not all environments allow this. */
-    /* If you want USS log, you can use ADDRESS SYSCALLS and write() */
+    /* If you want USS log, you can use ADDRESS SYLS and write() */
     nop
   end
 return
 
 Timestamp: procedure
+  /* Basic timestamp, local time */
+  parse value date('S') with y 5 m 7 d 9
+  parse value time('L') with hh 1 2 ":" mm 4 2 ":" ss 7 2
+return y"-"m"-"d" "hh":"mm":"ss
+
+Timestamp2: procedure
   /* Basic timestamp, local time */
   parse value date('S') with y 5 m 7 d 9
   parse value time('L') with hh 1 2 ":" mm 4 2 ":" ss 7 2

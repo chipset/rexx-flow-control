@@ -72,6 +72,22 @@ test('finds direct function-style calls like Prompt(...) within procedures', () 
   assert.ok(hasEdge(g, 'ACTION_LOADRECORD', 'PROMPT', 'calls'));
 });
 
+test('captures ADDRESS LINKMVS quoted targets as external program calls', () => {
+  const src = `Main:
+  address linkmvs "TPXUSNSF"
+  ADDRESS LINKMVS 'IEFBR14'
+  return`;
+  const g = parseRexxControlFlow(src);
+  const ext1 = g.nodes.find((n) => n.id === 'LINKMVS:TPXUSNSF');
+  const ext2 = g.nodes.find((n) => n.id === 'LINKMVS:IEFBR14');
+  assert.ok(ext1);
+  assert.ok(ext2);
+  assert.equal(ext1.kind, 'external-program');
+  assert.equal(ext1.label, 'TPXUSNSF');
+  assert.ok(hasEdge(g, 'MAIN', 'LINKMVS:TPXUSNSF', 'external-call'));
+  assert.ok(hasEdge(g, 'MAIN', 'LINKMVS:IEFBR14', 'external-call'));
+});
+
 test('resolves function-style calls to labels defined later in file', () => {
   const src = `x = Helper("abc")\nreturn\nHelper: procedure\n  return\n`;
   const g = parseRexxControlFlow(src);
@@ -86,6 +102,132 @@ test('marks SIGNAL ON NAME handlers as signal functions', () => {
   assert.equal(handler.isSignalHandler, true);
   assert.ok(hasEdge(g, 'MAIN', 'TRAPSYNTAX', 'signal-on'));
   assert.equal(handler.line, 2);
+});
+
+test('reports undefined labels and unreachable procedures', () => {
+  const src = `CALL START
+CALL MISSING_LABEL
+START: CALL WORKER
+  RETURN
+WORKER: RETURN
+UNUSED: RETURN`;
+  const g = parseRexxControlFlow(src);
+
+  assert.deepEqual(g.analysis.undefinedLabels.map((item) => item.id), ['MISSING_LABEL']);
+  assert.ok(g.analysis.unreachableProcedures.includes('UNUSED'));
+  assert.ok(g.analysis.orphanProcedures.includes('UNUSED'));
+});
+
+test('surfaces recursive cycles and complexity metrics', () => {
+  const src = `CALL A
+A: IF ready THEN CALL B
+  RETURN
+B: CALL A
+  RETURN`;
+  const g = parseRexxControlFlow(src);
+
+  assert.equal(g.analysis.recursiveCycles.length, 1);
+  assert.deepEqual(g.analysis.recursiveCycles[0].members, ['A', 'B']);
+
+  const metricA = g.analysis.metrics.find((item) => item.id === 'A');
+  assert.ok(metricA);
+  assert.equal(metricA.branchCount, 1);
+  assert.equal(metricA.cyclomaticComplexity, 2);
+});
+
+test('flags exit statements that may bypass cleanup heuristically', () => {
+  const src = `MAIN: CALL WORK
+  RETURN
+WORK:
+  IF bad THEN EXIT
+  RETURN`;
+  const g = parseRexxControlFlow(src);
+
+  assert.equal(g.analysis.cleanupBypassRisks.length, 1);
+  assert.equal(g.analysis.cleanupBypassRisks[0].scope, 'WORK');
+});
+
+test('detects dead code after unconditional return within a procedure', () => {
+  const src = `MAIN:
+  CALL INIT
+  RETURN
+  CALL NEVER
+INIT: RETURN
+NEVER: RETURN`;
+  const g = parseRexxControlFlow(src);
+
+  assert.equal(g.analysis.deadCodeStatements.length, 1);
+  assert.equal(g.analysis.deadCodeStatements[0].scope, 'MAIN');
+  assert.equal(g.analysis.deadCodeStatements[0].line, 4);
+  assert.ok(g.nodes.find((node) => node.id === 'MAIN').flags.includes('dead-code'));
+});
+
+test('does not mark code unreachable when return is guarded by IF THEN on prior line', () => {
+  const src = `MAIN:
+  IF ready THEN
+    RETURN
+  CALL NEXT
+NEXT: RETURN`;
+  const g = parseRexxControlFlow(src);
+
+  assert.equal(g.analysis.deadCodeStatements.length, 0);
+});
+
+test('does not mark code unreachable when return is inside IF THEN DO block', () => {
+  const src = `LOADCONFIG:
+  if \\IsDDAllocated(cfgDD) then do
+    call Msg "Config DD not allocated; using defaults."
+    return
+  end
+  call Msg "Loading config from DD:" cfgDD
+  return`;
+  const g = parseRexxControlFlow(src);
+
+  assert.equal(g.analysis.deadCodeStatements.length, 0);
+});
+
+test('ignores control-flow keywords that only appear inside quoted strings', () => {
+  const src = `MENU:
+  say "X) Exit"
+  say "DO FOREVER"
+  say "RETURN to menu"
+  pull ans
+  return ans`;
+  const g = parseRexxControlFlow(src);
+  const menu = g.analysis.procedures.find((item) => item.id === 'MENU');
+
+  assert.ok(menu);
+  assert.equal(menu.exitCount, 1);
+  assert.equal(menu.hasDoForever, false);
+  assert.equal(g.analysis.cleanupBypassRisks.length, 0);
+  assert.equal(g.analysis.possibleInfiniteLoops.length, 0);
+});
+
+test('flags do forever loops with no visible escape', () => {
+  const src = `MAIN:
+  DO FOREVER
+  CALL SPIN
+SPIN: RETURN`;
+  const g = parseRexxControlFlow(src);
+
+  assert.ok(g.analysis.possibleInfiniteLoops.some((item) => item.id === 'loop:MAIN'));
+});
+
+test('exposes procedure-level statement cfg metadata', () => {
+  const src = `MAIN:
+  CALL INIT
+  RETURN
+INIT:
+  IF ready THEN CALL WORK
+  RETURN
+WORK: RETURN`;
+  const g = parseRexxControlFlow(src);
+  const main = g.analysis.procedures.find((item) => item.id === 'MAIN');
+
+  assert.ok(main);
+  assert.equal(main.cfg.nodes.length, 2);
+  assert.equal(main.cfg.edges.length, 2);
+  assert.equal(main.cfg.edges[1].type, 'terminal');
 });
 
 test('renders DOT output with expected graph header', () => {

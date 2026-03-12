@@ -4,6 +4,9 @@ function parseRexxControlFlow(source) {
   const edges = [];
   const edgeKeys = new Set();
   const statementBlocks = [];
+  const scopeStatements = new Map();
+  const scopeExitStatements = new Map();
+  const referenceSites = new Map();
 
   upsertNode(nodes, "MAIN", "MAIN", 1, "entry");
 
@@ -42,15 +45,15 @@ function parseRexxControlFlow(source) {
   );
 
   for (const block of statementBlocks) {
-    processStatementBlock(
-      block.text,
-      block.lineNo,
-      block.scope,
+    processStatementBlock(block, {
       nodes,
       edges,
       edgeKeys,
-      definedLabels
-    );
+      definedLabels,
+      scopeStatements,
+      scopeExitStatements,
+      referenceSites
+    });
   }
 
   const nodeList = Array.from(nodes.values()).sort((a, b) => {
@@ -63,11 +66,26 @@ function parseRexxControlFlow(source) {
     return a.line - b.line || a.id.localeCompare(b.id);
   });
 
-  return { nodes: nodeList, edges };
+  const analysis = analyzeGraph(nodeList, edges, scopeStatements, scopeExitStatements, referenceSites);
+  for (const node of nodeList) {
+    node.sectionId = analysis.groupMap.section.get(node.id) || "ungrouped";
+    node.sectionLabel = analysis.groupLabels.get(node.sectionId) || "Ungrouped";
+    node.cycleId = analysis.groupMap.cycle.get(node.id) || "";
+    node.flags = buildNodeFlags(node.id, analysis);
+  }
+
+  return { nodes: nodeList, edges, analysis };
 }
 
-function processStatementBlock(text, lineNo, currentScope, nodes, edges, edgeKeys, definedLabels) {
-  for (const segment of splitStatements(text)) {
+function processStatementBlock(
+  block,
+  { nodes, edges, edgeKeys, definedLabels, scopeStatements, scopeExitStatements, referenceSites }
+) {
+  for (const segment of splitStatements(block.text)) {
+    recordScopeStatement(scopeStatements, block.scope, segment, block.lineNo);
+    maybeRecordExitRisk(scopeExitStatements, block.scope, segment, block.lineNo);
+
+    const externalCalls = extractAddressLinkmvsTargets(segment);
     const upper = segment.toUpperCase();
     const searchable = maskQuotedText(upper);
     const signalPattern = /\bSIGNAL\b\s+ON\b(?:\s+[A-Z0-9_.$!?@#]+)?\s+NAME\b\s+([A-Z0-9_.$!?@#]+)/g;
@@ -80,15 +98,26 @@ function processStatementBlock(text, lineNo, currentScope, nodes, edges, edgeKey
       if (!target || target === "ON" || target === "OFF") {
         continue;
       }
-      upsertNode(nodes, target, target, lineNo, "reference");
+      upsertNode(nodes, target, target, block.lineNo, "reference");
       markSignalHandler(nodes, target);
-      addEdge(edges, edgeKeys, currentScope, target, "signal-on", lineNo);
+      addEdge(edges, edgeKeys, block.scope, target, "signal-on", block.lineNo);
+      recordReference(referenceSites, target, block.scope, block.lineNo, "signal-on");
+    }
+
+    for (const targetText of externalCalls) {
+      const normalizedTarget = normalizeExternalTarget(targetText);
+      if (!normalizedTarget) {
+        continue;
+      }
+      const nodeId = `LINKMVS:${normalizedTarget}`;
+      upsertNode(nodes, nodeId, targetText, block.lineNo, "external-program");
+      addEdge(edges, edgeKeys, block.scope, nodeId, "external-call", block.lineNo);
     }
 
     while ((match = callPattern.exec(searchable)) !== null) {
       if (match[1] === "VALUE" || match[1] === "(") {
-        upsertNode(nodes, "DYNAMIC_CALL", "DYNAMIC_CALL", lineNo, "dynamic");
-        addEdge(edges, edgeKeys, currentScope, "DYNAMIC_CALL", "calls-dynamic", lineNo);
+        upsertNode(nodes, "DYNAMIC_CALL", "DYNAMIC_CALL", block.lineNo, "dynamic");
+        addEdge(edges, edgeKeys, block.scope, "DYNAMIC_CALL", "calls-dynamic", block.lineNo);
         continue;
       }
 
@@ -97,8 +126,9 @@ function processStatementBlock(text, lineNo, currentScope, nodes, edges, edgeKey
         continue;
       }
 
-      upsertNode(nodes, target, target, lineNo, "reference");
-      addEdge(edges, edgeKeys, currentScope, target, "calls", lineNo);
+      upsertNode(nodes, target, target, block.lineNo, "reference");
+      addEdge(edges, edgeKeys, block.scope, target, "calls", block.lineNo);
+      recordReference(referenceSites, target, block.scope, block.lineNo, "calls");
     }
 
     const directInvokePattern = /\b([A-Z0-9_.$!?@#]+)\s*\(/g;
@@ -108,10 +138,601 @@ function processStatementBlock(text, lineNo, currentScope, nodes, edges, edgeKey
       if (!definedLabels || !definedLabels.has(target) || target === "MAIN") {
         continue;
       }
-      upsertNode(nodes, target, target, lineNo, "reference");
-      addEdge(edges, edgeKeys, currentScope, target, "calls", lineNo);
+      upsertNode(nodes, target, target, block.lineNo, "reference");
+      addEdge(edges, edgeKeys, block.scope, target, "calls", block.lineNo);
+      recordReference(referenceSites, target, block.scope, block.lineNo, "calls");
     }
   }
+}
+
+function analyzeGraph(nodes, edges, scopeStatements, scopeExitStatements, referenceSites) {
+  const definedProcedureIds = new Set(
+    nodes.filter((node) => node.kind === "function" || node.kind === "entry").map((node) => node.id)
+  );
+  const procedureNodes = nodes.filter(
+    (node) =>
+      node.kind === "function" || node.kind === "entry" || (node.kind === "reference" && definedProcedureIds.has(node.id))
+  );
+  const procedureIds = new Set(procedureNodes.map((node) => node.id));
+
+  const outgoing = new Map();
+  const incoming = new Map();
+  for (const node of procedureNodes) {
+    outgoing.set(node.id, []);
+    incoming.set(node.id, []);
+  }
+
+  for (const edge of edges) {
+    if (!procedureIds.has(edge.from) || !procedureIds.has(edge.to)) {
+      continue;
+    }
+    outgoing.get(edge.from).push(edge);
+    incoming.get(edge.to).push(edge);
+  }
+
+  const reachable = walkReachable("MAIN", outgoing);
+  const unreachableProcedures = procedureNodes
+    .filter((node) => node.id !== "MAIN" && !reachable.has(node.id))
+    .map((node) => node.id);
+  const orphanProcedures = procedureNodes
+    .filter(
+      (node) =>
+        node.id !== "MAIN" &&
+        node.kind === "function" &&
+        !node.isSignalHandler &&
+        !reachable.has(node.id)
+    )
+    .map((node) => node.id);
+
+  const undefinedLabels = nodes
+    .filter((node) => node.kind === "reference" && !definedProcedureIds.has(node.id))
+    .map((node) => {
+      const refs = referenceSites.get(node.id) || [];
+      return {
+        id: node.id,
+        line: node.line,
+        callers: Array.from(new Set(refs.map((ref) => ref.scope))).sort(),
+        referenceTypes: Array.from(new Set(refs.map((ref) => ref.type))).sort()
+      };
+    })
+    .sort((a, b) => a.line - b.line || a.id.localeCompare(b.id));
+
+  const suspiciousCallTargets = undefinedLabels.map((item) => ({
+    ...item,
+    message: `No matching label definition was found for ${item.id}.`
+  }));
+
+  const recursiveCycles = computeRecursiveCycles(procedureNodes, outgoing);
+  const cycleMembers = new Set(recursiveCycles.flatMap((cycle) => cycle.members));
+  const procedureDetails = procedureNodes
+    .map((node) => buildProcedureAnalysis(node.id, scopeStatements.get(node.id) || []))
+    .sort((a, b) => a.line - b.line || a.id.localeCompare(b.id));
+  const procedureDetailById = new Map(procedureDetails.map((detail) => [detail.id, detail]));
+
+  const metrics = procedureNodes
+    .map((node) => {
+      const detail = procedureDetailById.get(node.id) || buildProcedureAnalysis(node.id, []);
+      const statementCount = detail.statementCount;
+      const branchCount = detail.branchCount;
+      const exitCount = detail.exitCount;
+      const fanOut = new Set((outgoing.get(node.id) || []).map((edge) => edge.to)).size;
+      const fanIn = new Set((incoming.get(node.id) || []).map((edge) => edge.from)).size;
+      return {
+        id: node.id,
+        line: node.line,
+        fanIn,
+        fanOut,
+        statementCount,
+        branchCount,
+        exitCount,
+        cyclomaticComplexity: 1 + branchCount
+      };
+    })
+    .sort((a, b) => b.cyclomaticComplexity - a.cyclomaticComplexity || a.id.localeCompare(b.id));
+
+  const metricById = new Map(metrics.map((metric) => [metric.id, metric]));
+  const cleanupBypassRisks = [];
+  for (const [scope, sites] of scopeExitStatements.entries()) {
+    const detail = procedureDetailById.get(scope);
+    const statements = detail?.statements || [];
+    for (const site of sites) {
+      const siteIndex = statements.findIndex((statement) => statement.line === site.line && statement.text === site.statement);
+      const laterCleanup = siteIndex >= 0
+        ? statements.slice(siteIndex + 1).find((statement) => statement.isCleanupLike)
+        : null;
+      if (laterCleanup) {
+        cleanupBypassRisks.push({
+          scope,
+          line: site.line,
+          statement: site.statement,
+          bypassedLine: laterCleanup.line,
+          message: `EXIT bypasses later cleanup-like statement at line ${laterCleanup.line}.`
+        });
+        continue;
+      }
+
+      const outgoingTargets = new Set((outgoing.get(scope) || []).map((edge) => edge.to));
+      const hasCleanupCall = Array.from(outgoingTargets).some((target) => isCleanupLikeText(target));
+      if (scope !== "MAIN" && !hasCleanupCall) {
+        cleanupBypassRisks.push({
+          scope,
+          line: site.line,
+          statement: site.statement,
+          bypassedLine: null,
+          message: "EXIT appears in a procedure with no obvious cleanup path."
+        });
+      }
+    }
+  }
+
+  const possibleInfiniteLoops = [
+    ...recursiveCycles
+      .filter((cycle) => cycle.members.some((member) => (metricById.get(member)?.exitCount || 0) === 0))
+      .map((cycle) => ({
+        id: cycle.id,
+        members: cycle.members,
+        lines: cycle.lines,
+        message: "Recursive cycle has no explicit RETURN or EXIT in at least one member."
+      })),
+    ...procedureDetails
+      .filter((detail) => detail.hasDoForever && !detail.hasLoopEscape)
+      .map((detail) => ({
+        id: `loop:${detail.id}`,
+        members: [detail.id],
+        lines: [detail.line],
+        message: "Procedure contains DO FOREVER without a visible LEAVE, RETURN, or EXIT."
+      }))
+  ];
+  const deadCodeStatements = procedureDetails.flatMap((detail) =>
+    detail.deadCode.map((item) => ({
+      scope: detail.id,
+      line: item.line,
+      statement: item.text,
+      afterLine: item.afterLine
+    }))
+  );
+
+  const sectionInfo = buildSectionGroups(procedureNodes);
+  const groups = {
+    file: [{ id: "file:current", label: "Current File", nodeIds: nodes.map((node) => node.id) }],
+    kind: buildKindGroups(nodes),
+    section: sectionInfo.groups,
+    cycle: recursiveCycles.map((cycle) => ({
+      id: cycle.id,
+      label: cycle.label,
+      nodeIds: [...cycle.members]
+    }))
+  };
+
+  const groupMap = {
+    section: new Map(sectionInfo.assignments),
+    cycle: new Map(recursiveCycles.flatMap((cycle) => cycle.members.map((member) => [member, cycle.id])))
+  };
+  const groupLabels = new Map([
+    ...sectionInfo.groups.map((group) => [group.id, group.label]),
+    ...recursiveCycles.map((cycle) => [cycle.id, cycle.label])
+  ]);
+
+  return {
+    roots: ["MAIN"],
+    unreachableProcedures,
+    orphanProcedures,
+    undefinedLabels,
+    suspiciousCallTargets,
+    recursiveCycles,
+    possibleInfiniteLoops,
+    deadCodeStatements,
+    cleanupBypassRisks,
+    metrics,
+    procedures: procedureDetails,
+    groups,
+    groupMap,
+    groupLabels,
+    cycleMembers: [...cycleMembers]
+  };
+}
+
+function buildNodeFlags(nodeId, analysis) {
+  const flags = [];
+  if (analysis.unreachableProcedures.includes(nodeId)) {
+    flags.push("unreachable");
+  }
+  if (analysis.orphanProcedures.includes(nodeId)) {
+    flags.push("orphan");
+  }
+  if (analysis.cycleMembers.includes(nodeId)) {
+    flags.push("recursive");
+  }
+  if (analysis.undefinedLabels.some((item) => item.id === nodeId)) {
+    flags.push("undefined");
+  }
+  if ((analysis.procedures || []).some((item) => item.id === nodeId && item.deadCode.length > 0)) {
+    flags.push("dead-code");
+  }
+  return flags;
+}
+
+function recordScopeStatement(scopeStatements, scope, statement, line) {
+  if (!scopeStatements.has(scope)) {
+    scopeStatements.set(scope, []);
+  }
+  scopeStatements.get(scope).push(buildStatementRecord(statement, line));
+}
+
+function maybeRecordExitRisk(scopeExitStatements, scope, statement, line) {
+  const upper = collapse(maskQuotedText(String(statement || "").toUpperCase()));
+  if (!/\bEXIT\b/.test(upper)) {
+    return;
+  }
+  if (!scopeExitStatements.has(scope)) {
+    scopeExitStatements.set(scope, []);
+  }
+  scopeExitStatements.get(scope).push({ statement, line });
+}
+
+function recordReference(referenceSites, target, scope, line, type) {
+  if (!referenceSites.has(target)) {
+    referenceSites.set(target, []);
+  }
+  referenceSites.get(target).push({ scope, line, type });
+}
+
+function walkReachable(start, outgoing) {
+  const visited = new Set();
+  if (!outgoing.has(start)) {
+    return visited;
+  }
+  const queue = [start];
+  visited.add(start);
+  for (let i = 0; i < queue.length; i += 1) {
+    const current = queue[i];
+    for (const edge of outgoing.get(current) || []) {
+      if (!visited.has(edge.to)) {
+        visited.add(edge.to);
+        queue.push(edge.to);
+      }
+    }
+  }
+  return visited;
+}
+
+function countBranchStatements(statements) {
+  let count = 0;
+  for (const item of statements) {
+    const upper = item.analysisUpper;
+    count += countMatches(upper, /\bIF\b/g);
+    count += countMatches(upper, /\bWHEN\b/g);
+    count += countMatches(upper, /\bOTHERWISE\b/g);
+    count += countMatches(upper, /\bSELECT\b/g);
+    count += countMatches(upper, /\bDO\b\s+(?:WHILE|UNTIL|FOREVER)\b/g);
+    count += countMatches(upper, /\bSIGNAL\b\s+ON\b/g);
+  }
+  return count;
+}
+
+function countExitStatements(statements) {
+  let count = 0;
+  for (const item of statements) {
+    count += countMatches(item.analysisUpper, /\b(?:RETURN|EXIT)\b/g);
+  }
+  return count;
+}
+
+function countMatches(text, pattern) {
+  const matches = text.match(pattern);
+  return matches ? matches.length : 0;
+}
+
+function buildStatementRecord(statement, line) {
+  const text = collapse(statement);
+  const upper = text.toUpperCase();
+  const analysisUpper = collapse(maskQuotedText(upper));
+  const kind = classifyStatementKind(analysisUpper);
+  return {
+    line,
+    text,
+    upper,
+    analysisUpper,
+    kind,
+    isConditional: kind === "conditional",
+    opensGuardedNextStatement: opensGuardedNextStatement(analysisUpper),
+    isLoop: kind === "loop",
+    isTerminal: isUnconditionalTerminal(analysisUpper),
+    isLoopEscape: /\b(?:LEAVE|ITERATE)\b/.test(analysisUpper),
+    isCleanupLike: isCleanupLikeText(analysisUpper),
+    opensDoBlock: opensDoBlock(analysisUpper),
+    closesBlock: closesBlock(analysisUpper)
+  };
+}
+
+function classifyStatementKind(upper) {
+  if (/^IF\b/.test(upper)) {
+    return "conditional";
+  }
+  if (/^(SELECT|WHEN|OTHERWISE)\b/.test(upper)) {
+    return "branch";
+  }
+  if (/^DO\b(?:\s+(?:WHILE|UNTIL|FOREVER))?/.test(upper)) {
+    return "loop";
+  }
+  if (/^RETURN\b/.test(upper)) {
+    return "return";
+  }
+  if (/^EXIT\b/.test(upper)) {
+    return "exit";
+  }
+  if (/^SIGNAL\b(?!\s+ON\b)/.test(upper)) {
+    return "signal";
+  }
+  if (/^CALL\b/.test(upper)) {
+    return "call";
+  }
+  return "statement";
+}
+
+function isUnconditionalTerminal(upper) {
+  return /^RETURN\b/.test(upper) || /^EXIT\b/.test(upper) || /^SIGNAL\b(?!\s+ON\b)/.test(upper);
+}
+
+function opensGuardedNextStatement(upper) {
+  if (!/^(IF|WHEN)\b/.test(upper)) {
+    return false;
+  }
+  if (!/\bTHEN\b/.test(upper)) {
+    return false;
+  }
+  if (/\bTHEN\s+DO\b/.test(upper)) {
+    return false;
+  }
+  return /\bTHEN\s*$/.test(upper);
+}
+
+function opensDoBlock(upper) {
+  if (/^END\b/.test(upper)) {
+    return false;
+  }
+  return /\bDO\b/.test(upper);
+}
+
+function closesBlock(upper) {
+  return /^END\b/.test(upper);
+}
+
+function isCleanupLikeText(text) {
+  return /(CLEAN|CLOSE|FINAL|FREE|RELEASE|RESET|RESTORE|ROLLBACK|TEARDOWN|UNLOCK)/.test(
+    String(text || "").toUpperCase()
+  );
+}
+
+function buildProcedureAnalysis(id, statements) {
+  const normalizedStatements = statements.map((statement) =>
+    statement.upper ? statement : buildStatementRecord(statement.statement || statement.text || "", statement.line)
+  );
+  const cfgNodes = normalizedStatements.map((statement, index) => ({
+    id: `${id}:${index + 1}`,
+    line: statement.line,
+    text: statement.text,
+    kind: statement.kind
+  }));
+  const cfgEdges = [];
+  const deadCode = [];
+  let reachable = true;
+  let terminalLine = null;
+  let guardedByPreviousConditional = false;
+  let blockDepth = 0;
+
+  for (let i = 0; i < normalizedStatements.length; i += 1) {
+    const current = normalizedStatements[i];
+    const depthBeforeStatement = blockDepth;
+    current.reachable = reachable;
+    if (!reachable) {
+      deadCode.push({ line: current.line, text: current.text, afterLine: terminalLine });
+      if (current.closesBlock) {
+        blockDepth = Math.max(0, blockDepth - 1);
+      }
+      if (current.opensDoBlock) {
+        blockDepth += 1;
+      }
+      continue;
+    }
+
+    const isConditionallyExecutedTerminal = current.isTerminal && guardedByPreviousConditional;
+    const isTerminalInsideBlock = current.isTerminal && depthBeforeStatement > 0;
+
+    if (current.isTerminal && !isConditionallyExecutedTerminal && !isTerminalInsideBlock) {
+      terminalLine = current.line;
+      cfgEdges.push({
+        from: `${id}:${i + 1}`,
+        to: null,
+        type: "terminal",
+        line: current.line
+      });
+      reachable = false;
+      continue;
+    }
+
+    if (i + 1 < normalizedStatements.length) {
+      cfgEdges.push({
+        from: `${id}:${i + 1}`,
+        to: `${id}:${i + 2}`,
+        type: current.isConditional ? "branch-next" : "next",
+        line: current.line
+      });
+    }
+
+    guardedByPreviousConditional = Boolean(current.opensGuardedNextStatement);
+    if (isConditionallyExecutedTerminal) {
+      guardedByPreviousConditional = false;
+    }
+    if (current.closesBlock) {
+      blockDepth = Math.max(0, blockDepth - 1);
+    }
+    if (current.opensDoBlock) {
+      blockDepth += 1;
+    }
+  }
+
+  return {
+    id,
+    line: normalizedStatements[0]?.line || 1,
+    statementCount: normalizedStatements.length,
+    branchCount: countBranchStatements(normalizedStatements),
+    exitCount: countExitStatements(normalizedStatements),
+    hasDoForever: normalizedStatements.some((statement) => /\bDO\s+FOREVER\b/.test(statement.analysisUpper)),
+    hasLoopEscape: normalizedStatements.some(
+      (statement) => statement.isLoopEscape || statement.isTerminal
+    ),
+    statements: normalizedStatements,
+    cfg: {
+      nodes: cfgNodes,
+      edges: cfgEdges
+    },
+    deadCode
+  };
+}
+
+function computeRecursiveCycles(nodes, outgoing) {
+  const ids = nodes.map((node) => node.id);
+  const idSet = new Set(ids);
+  const indexById = new Map();
+  const lowById = new Map();
+  const stack = [];
+  const onStack = new Set();
+  const components = [];
+  let index = 0;
+
+  function strongConnect(id) {
+    indexById.set(id, index);
+    lowById.set(id, index);
+    index += 1;
+    stack.push(id);
+    onStack.add(id);
+
+    for (const edge of outgoing.get(id) || []) {
+      if (!idSet.has(edge.to)) {
+        continue;
+      }
+      if (!indexById.has(edge.to)) {
+        strongConnect(edge.to);
+        lowById.set(id, Math.min(lowById.get(id), lowById.get(edge.to)));
+      } else if (onStack.has(edge.to)) {
+        lowById.set(id, Math.min(lowById.get(id), indexById.get(edge.to)));
+      }
+    }
+
+    if (lowById.get(id) === indexById.get(id)) {
+      const component = [];
+      while (stack.length) {
+        const popped = stack.pop();
+        onStack.delete(popped);
+        component.push(popped);
+        if (popped === id) {
+          break;
+        }
+      }
+      components.push(component.sort());
+    }
+  }
+
+  for (const id of ids) {
+    if (!indexById.has(id)) {
+      strongConnect(id);
+    }
+  }
+
+  return components
+    .filter((component) => {
+      if (component.length > 1) {
+        return true;
+      }
+      const only = component[0];
+      return (outgoing.get(only) || []).some((edge) => edge.to === only);
+    })
+    .map((component, idx) => ({
+      id: `cycle:${idx + 1}`,
+      label: component.length === 1 ? `Self recursion: ${component[0]}` : `Recursive cycle ${idx + 1}`,
+      members: component,
+      lines: component.map((member) => nodes.find((node) => node.id === member)?.line || 1).sort((a, b) => a - b)
+    }));
+}
+
+function buildSectionGroups(nodes) {
+  const prefixCounts = new Map();
+  for (const node of nodes) {
+    const prefix = deriveSectionPrefix(node.id);
+    if (!prefix) {
+      continue;
+    }
+    prefixCounts.set(prefix, (prefixCounts.get(prefix) || 0) + 1);
+  }
+
+  const assignments = [];
+  const groupsById = new Map();
+  for (const node of nodes) {
+    const prefix = deriveSectionPrefix(node.id);
+    const sectionId =
+      node.id === "MAIN"
+        ? "section:entry"
+        : prefix && (prefixCounts.get(prefix) || 0) > 1
+          ? `section:${prefix}`
+          : "section:core";
+    const label =
+      sectionId === "section:entry"
+        ? "Entry"
+        : sectionId === "section:core"
+          ? "Core Procedures"
+          : prefix;
+    assignments.push([node.id, sectionId]);
+    if (!groupsById.has(sectionId)) {
+      groupsById.set(sectionId, { id: sectionId, label, nodeIds: [] });
+    }
+    groupsById.get(sectionId).nodeIds.push(node.id);
+  }
+
+  return {
+    assignments,
+    groups: Array.from(groupsById.values()).sort((a, b) => a.label.localeCompare(b.label))
+  };
+}
+
+function deriveSectionPrefix(id) {
+  if (!id || id === "MAIN") {
+    return "";
+  }
+  const token = String(id).split(/[_.]/)[0];
+  return token && token.length >= 3 ? token : "";
+}
+
+function buildKindGroups(nodes) {
+  const buckets = new Map();
+  for (const node of nodes) {
+    const kind = node.kind || "unknown";
+    if (!buckets.has(kind)) {
+      buckets.set(kind, { id: `kind:${kind}`, label: kind.replace(/-/g, " "), nodeIds: [] });
+    }
+    buckets.get(kind).nodeIds.push(node.id);
+  }
+  return Array.from(buckets.values()).sort((a, b) => a.label.localeCompare(b.label));
+}
+
+function extractAddressLinkmvsTargets(segment) {
+  const targets = [];
+  const pattern = /\bADDRESS\s+LINKMVS\s+(['"])([^'"]+)\1/gi;
+  let match;
+  while ((match = pattern.exec(segment)) !== null) {
+    const target = String(match[2] || "").trim();
+    if (target) {
+      targets.push(target);
+    }
+  }
+  return targets;
+}
+
+function normalizeExternalTarget(value) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, " ");
 }
 
 function addEdge(edges, edgeKeys, from, to, type, line) {
@@ -130,7 +751,6 @@ function upsertNode(nodes, id, label, line, kind) {
     return;
   }
 
-  // Preserve definition locations for real functions/entry points.
   if (line < existing.line && existing.kind !== "function" && existing.kind !== "entry") {
     existing.line = line;
   }
@@ -147,7 +767,6 @@ function defineNode(nodes, id, label, line, kind) {
     return;
   }
 
-  // When a true label definition is found, bind the node to that line.
   existing.line = line;
   if (existing.kind !== "entry") {
     existing.kind = kind;
@@ -264,12 +883,12 @@ function toDot(graph) {
   const out = ["digraph REXXControlFlow {", "  rankdir=TB;"];
 
   for (const node of graph.nodes) {
-    out.push(`  \"${escapeDot(node.id)}\" [label=\"${escapeDot(node.label)}\"];`);
+    out.push(`  "${escapeDot(node.id)}" [label="${escapeDot(node.label)}"];`);
   }
 
   for (const edge of graph.edges) {
     out.push(
-      `  \"${escapeDot(edge.from)}\" -> \"${escapeDot(edge.to)}\" [label=\"${escapeDot(edge.type)}\"];`
+      `  "${escapeDot(edge.from)}" -> "${escapeDot(edge.to)}" [label="${escapeDot(edge.type)}"];`
     );
   }
 
@@ -278,7 +897,7 @@ function toDot(graph) {
 }
 
 function escapeDot(value) {
-  return String(value).replace(/\\/g, "\\\\").replace(/\"/g, '\\\"');
+  return String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
 function buildNorthSouthLayers(nodes, edges) {

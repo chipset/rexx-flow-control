@@ -1,8 +1,8 @@
 {
   "name": "rexx-control-flow",
   "displayName": "REXX Control Flow",
-  "description": "Visualize and export control-flow graphs for REXX programs.",
-  "version": "0.1.8",
+  "description": "Visualize REXX procedure graphs with control-flow diagnostics and exports.",
+  "version": "0.1.10",
   "publisher": "TMcQ",
   "repository": {
     "type": "git",
@@ -70,6 +70,16 @@
           "type": "string",
           "default": "",
           "markdownDescription": "Optional path to a `.css` file used to override the control-flow webview styling. Relative paths resolve from the current workspace folder.",
+          "scope": "resource"
+        },
+        "rexxFlow.defaultView": {
+          "type": "string",
+          "enum": [
+            "graph",
+            "detailed"
+          ],
+          "default": "graph",
+          "markdownDescription": "Default control-flow webview mode. `graph` opens with advanced details collapsed; `detailed` opens the diagnostics and control panels expanded.",
           "scope": "resource"
         }
       }
