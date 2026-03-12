@@ -2,6 +2,8 @@
 
 REXX Control Flow is a VS Code extension that visualizes a procedure-level call graph for REXX and layers control-flow diagnostics on top of it.
 
+![graph](https://raw.githubusercontent.com/chipset/rexx-flow-control/e8c454086a01e882a79ab55fea3a27ab5325d0c7/images/flow.png)
+
 ## Features
 
 - Generate an interactive call graph from the active REXX editor.
@@ -44,7 +46,6 @@ REXX Control Flow is a VS Code extension that visualizes a procedure-level call 
 - `ADDRESS LINKMVS "program"` / `ADDRESS LINKMVS 'program'` as `external-call` edges to external-program nodes
 - Multiple statements per line separated by `;` (quote-aware splitting)
 - Block/in-line comment stripping for parsing
-
 
 ## Usage
 
@@ -93,6 +94,7 @@ Right-click editor context menu focuses on graph generation (export actions are 
 
 ## Notes
 
-- The main canvas is still a higher-level procedure/call graph, not a full rendered statement-by-statement CFG.
 - Diagnostics now use additional statement-level analysis inside each procedure to detect dead code and some loop/exit risks.
 - Supported file/language IDs: `rexx`, `REXX`, and common file extensions (`.rexx`, `.rex`, `.exec`).
+- Works great with the Broadcom Rexx LSP.
+- Example CSS file on the github site.

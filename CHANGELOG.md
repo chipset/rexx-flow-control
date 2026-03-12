@@ -1,21 +1,19 @@
 # Changelog
 
-## 0.1.12
-
-- Removed `Export REXX Control Flow to JSON` from the editor right-click menu.
 
 ## 0.1.11
-
-- Export actions now open a Save dialog with defaults based on the active REXX file:
-  - default folder is the source file's folder
-  - default filename uses the source base name
-  - extension is set by export type (`.json`, `.dot`, `.excalidraw`, `.svg`, `.png`)
-- SVG/PNG exports now use VS Code save flow instead of browser-style downloads.
+- Added new help
+- Fixed an edge case for uncalled code (EXIT before a RETURN)
 
 ## 0.1.10
 
 - Removed DOT and Excalidraw export options from the editor right-click menu.
 - Added graph toolbar buttons for `Export DOT` and `Export Excalidraw` (alongside existing SVG/PNG export).
+- Export actions now open a Save dialog with defaults based on the active REXX file:
+  - default folder is the source file's folder
+  - default filename uses the source base name
+  - extension is set by export type (`.json`, `.dot`, `.excalidraw`, `.svg`, `.png`)
+- SVG/PNG exports now use VS Code save flow instead of browser-style downloads.
 
 ## 0.1.9
 
