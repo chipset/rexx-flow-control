@@ -186,6 +186,18 @@ test('does not mark code unreachable when return is inside IF THEN DO block', ()
   assert.equal(g.analysis.deadCodeStatements.length, 0);
 });
 
+test('does not mark dead code when exit is immediately followed by return', () => {
+  const src = `MAIN:
+  if bad then exit
+  return
+  call NEXT
+NEXT: return`;
+  const g = parseRexxControlFlow(src);
+
+  assert.equal(g.analysis.deadCodeStatements.length, 1);
+  assert.equal(g.analysis.deadCodeStatements[0].line, 4);
+});
+
 test('ignores control-flow keywords that only appear inside quoted strings', () => {
   const src = `MENU:
   say "X) Exit"

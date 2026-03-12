@@ -522,11 +522,20 @@ function buildProcedureAnalysis(id, statements) {
   let blockDepth = 0;
 
   for (let i = 0; i < normalizedStatements.length; i += 1) {
+    const previous = normalizedStatements[i - 1] || null;
     const current = normalizedStatements[i];
+    const next = normalizedStatements[i + 1] || null;
     const depthBeforeStatement = blockDepth;
     current.reachable = reachable;
     if (!reachable) {
-      deadCode.push({ line: current.line, text: current.text, afterLine: terminalLine });
+      const isImmediateReturnAfterExit =
+        current.kind === "return" &&
+        previous &&
+        previous.kind === "exit" &&
+        current.line === previous.line + 1;
+      if (!isImmediateReturnAfterExit) {
+        deadCode.push({ line: current.line, text: current.text, afterLine: terminalLine });
+      }
       if (current.closesBlock) {
         blockDepth = Math.max(0, blockDepth - 1);
       }
@@ -538,8 +547,15 @@ function buildProcedureAnalysis(id, statements) {
 
     const isConditionallyExecutedTerminal = current.isTerminal && guardedByPreviousConditional;
     const isTerminalInsideBlock = current.isTerminal && depthBeforeStatement > 0;
+    const isExitFollowedByImmediateReturn =
+      current.kind === "exit" && next && next.kind === "return" && next.line === current.line + 1;
 
-    if (current.isTerminal && !isConditionallyExecutedTerminal && !isTerminalInsideBlock) {
+    if (
+      current.isTerminal &&
+      !isConditionallyExecutedTerminal &&
+      !isTerminalInsideBlock &&
+      !isExitFollowedByImmediateReturn
+    ) {
       terminalLine = current.line;
       cfgEdges.push({
         from: `${id}:${i + 1}`,
