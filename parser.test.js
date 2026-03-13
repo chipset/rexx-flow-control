@@ -88,6 +88,31 @@ test('captures ADDRESS LINKMVS quoted targets as external program calls', () => 
   assert.ok(hasEdge(g, 'MAIN', 'LINKMVS:IEFBR14', 'external-call'));
 });
 
+test('captures quoted TSO command statements as tso command calls', () => {
+  const src = `Main:
+  "EXECIO * DISKR" cfgDD "(STEM cfg. FINIS"
+  return`;
+  const g = parseRexxControlFlow(src);
+  const tso = g.nodes.find((n) => n.id.startsWith('TSO:'));
+
+  assert.ok(tso);
+  assert.equal(tso.kind, 'tso-command');
+  assert.ok(hasEdge(g, 'MAIN', tso.id, 'tso-call'));
+});
+
+test('captures TSO command text when paired double quotes span multiple lines', () => {
+  const src = `Main:
+  "ALLOC FI(INPUT) DA('SYS1.PARMLIB')
+  SHR REUSE"
+  return`;
+  const g = parseRexxControlFlow(src);
+  const tso = g.nodes.find((n) => n.id.startsWith('TSO:'));
+
+  assert.ok(tso);
+  assert.ok(tso.label.includes('ALLOC FI(INPUT)'));
+  assert.ok(hasEdge(g, 'MAIN', tso.id, 'tso-call'));
+});
+
 test('resolves function-style calls to labels defined later in file', () => {
   const src = `x = Helper("abc")\nreturn\nHelper: procedure\n  return\n`;
   const g = parseRexxControlFlow(src);
@@ -116,6 +141,17 @@ UNUSED: RETURN`;
   assert.deepEqual(g.analysis.undefinedLabels.map((item) => item.id), ['MISSING_LABEL']);
   assert.ok(g.analysis.unreachableProcedures.includes('UNUSED'));
   assert.ok(g.analysis.orphanProcedures.includes('UNUSED'));
+});
+
+test('reports lines that exceed the 80-column limit', () => {
+  const src = `MAIN:
+  SAY "123456789012345678901234567890123456789012345678901234567890123456789012345678901"
+  RETURN`;
+  const g = parseRexxControlFlow(src);
+
+  assert.equal(g.analysis.lineLengthWarnings.length, 1);
+  assert.equal(g.analysis.lineLengthWarnings[0].line, 2);
+  assert.ok(g.analysis.lineLengthWarnings[0].length > 80);
 });
 
 test('surfaces recursive cycles and complexity metrics', () => {

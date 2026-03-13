@@ -9,6 +9,7 @@ REXX Control Flow is a VS Code extension that visualizes a procedure-level call 
 - Generate an interactive call graph from the active REXX editor.
 - Auto-refresh the graph when source content changes or is saved.
 - Show diagnostics for undefined labels, unreachable procedures, recursive cycles, dead code after unconditional exits, and likely loop risks.
+- Report source lines that go past the 80-column limit.
 - Show per-procedure complexity and fan-in/fan-out metrics.
 - Search, filter, group, and collapse large graphs.
 - Persist graph UI state such as zoom, filters, focus mode, and group selection while the webview stays open.
@@ -22,6 +23,8 @@ REXX Control Flow is a VS Code extension that visualizes a procedure-level call 
   - `SIGNAL ON ... NAME handler` targets are shown as red boxes.
 - External LINKMVS program calls are visually distinct:
   - `ADDRESS LINKMVS "program"` adds a blue external-program node using the quoted program name.
+- TSO command strings are visually distinct and filterable:
+  - command statements that execute through paired double-quoted strings are shown as separate TSO nodes.
 - Unused procedures are highlighted
   - Shows procedures not used
 - Built-in graph navigation tools:
@@ -44,6 +47,7 @@ REXX Control Flow is a VS Code extension that visualizes a procedure-level call 
 - Dynamic calls (`CALL VALUE ...`, `CALL (...)`) grouped as `DYNAMIC_CALL`
 - `SIGNAL ON ... NAME handler` as `signal-on` edges and signal-handler node tagging
 - `ADDRESS LINKMVS "program"` / `ADDRESS LINKMVS 'program'` as `external-call` edges to external-program nodes
+- paired double-quoted TSO command statements as `tso-call` edges to TSO command nodes, including continued quoted text across lines
 - Multiple statements per line separated by `;` (quote-aware splitting)
 - Block/in-line comment stripping for parsing
 
@@ -74,6 +78,7 @@ Right-click editor context menu focuses on graph generation (export actions are 
   - Click another node to switch highlighted relationship context
 - Graph controls:
   - Filter calls, signals, external calls, and dynamic calls
+  - Filter TSO command edges separately
   - Group by logical section, recursion cycle, node kind, or file
   - Collapse/expand groups for large programs
 

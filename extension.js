@@ -541,7 +541,8 @@ function renderGraphHtml(graph, fileName, customCss = "", defaultViewMode = "gra
     statCard("Unreachable", (analysis.unreachableProcedures || []).length),
     statCard("Recursive cycles", (analysis.recursiveCycles || []).length),
     statCard("Cleanup risks", (analysis.cleanupBypassRisks || []).length),
-    statCard("Dead code", (analysis.deadCodeStatements || []).length)
+    statCard("Dead code", (analysis.deadCodeStatements || []).length),
+    statCard("> 80 cols", (analysis.lineLengthWarnings || []).length)
   ].join("");
   const diagnosticsHtml = renderDiagnosticsHtml(analysis);
   const groupModeOptions = [
@@ -581,6 +582,9 @@ function renderGraphHtml(graph, fileName, customCss = "", defaultViewMode = "gra
       --external-program-bg: #e2f2fb;
       --external-program-border: #31759c;
       --external-program-text: #154e71;
+      --tso-command-bg: #efe8ff;
+      --tso-command-border: #6a55a1;
+      --tso-command-text: #453273;
     }
     body {
       margin: 0;
@@ -660,7 +664,7 @@ function renderGraphHtml(graph, fileName, customCss = "", defaultViewMode = "gra
     }
     .stats {
       display: grid;
-      grid-template-columns: repeat(5, minmax(0, 1fr));
+      grid-template-columns: repeat(6, minmax(0, 1fr));
       gap: 10px;
       margin-bottom: 14px;
     }
@@ -946,6 +950,13 @@ function renderGraphHtml(graph, fileName, customCss = "", defaultViewMode = "gra
     .node.kind-external-program .name {
       color: var(--external-program-text);
     }
+    .node.kind-tso-command {
+      border-color: var(--tso-command-border);
+      background: var(--tso-command-bg);
+    }
+    .node.kind-tso-command .name {
+      color: var(--tso-command-text);
+    }
     .panel {
       border: 1px solid var(--border);
       border-radius: 16px;
@@ -1087,6 +1098,7 @@ function renderGraphHtml(graph, fileName, customCss = "", defaultViewMode = "gra
               <label class="filter-chip"><input id="filterCalls" type="checkbox" checked /> calls</label>
               <label class="filter-chip"><input id="filterSignals" type="checkbox" checked /> signals</label>
               <label class="filter-chip"><input id="filterExternal" type="checkbox" checked /> external</label>
+              <label class="filter-chip"><input id="filterTso" type="checkbox" checked /> tso</label>
               <label class="filter-chip"><input id="filterDynamic" type="checkbox" checked /> dynamic</label>
             </div>
           </div>
@@ -1212,6 +1224,7 @@ function renderGraphHtml(graph, fileName, customCss = "", defaultViewMode = "gra
         call: document.getElementById('filterCalls').checked,
         signal: document.getElementById('filterSignals').checked,
         external: document.getElementById('filterExternal').checked,
+        tso: document.getElementById('filterTso').checked,
         dynamic: document.getElementById('filterDynamic').checked
       };
     }
@@ -1607,7 +1620,7 @@ function renderGraphHtml(graph, fileName, customCss = "", defaultViewMode = "gra
       }
     });
 
-    ['filterCalls', 'filterSignals', 'filterExternal', 'filterDynamic'].forEach((id) => {
+    ['filterCalls', 'filterSignals', 'filterExternal', 'filterTso', 'filterDynamic'].forEach((id) => {
       document.getElementById(id).addEventListener('change', () => {
         applyState();
       });
@@ -1740,6 +1753,7 @@ function renderGraphHtml(graph, fileName, customCss = "", defaultViewMode = "gra
         document.getElementById('filterCalls').checked = persisted.filters.call !== false;
         document.getElementById('filterSignals').checked = persisted.filters.signal !== false;
         document.getElementById('filterExternal').checked = persisted.filters.external !== false;
+        document.getElementById('filterTso').checked = persisted.filters.tso !== false;
         document.getElementById('filterDynamic').checked = persisted.filters.dynamic !== false;
       }
       if (Array.isArray(persisted.collapsedGroupIds)) {
@@ -1851,6 +1865,9 @@ function edgeCategoryForType(type) {
   if (type === "external-call") {
     return "external";
   }
+  if (type === "tso-call") {
+    return "tso";
+  }
   if (type === "calls-dynamic") {
     return "dynamic";
   }
@@ -1895,12 +1912,19 @@ function renderDiagnosticsHtml(analysis) {
     nodeId: item.scope,
     line: item.line
   }));
+  const longLines = (analysis.lineLengthWarnings || []).map((item) => ({
+    title: `Line ${item.line}`,
+    meta: `${item.length} columns (limit ${item.maxColumns}). ${item.preview}`,
+    nodeId: "",
+    line: item.line
+  }));
 
   sections.push(renderDiagnosticSection("Undefined labels", undefinedLabels));
   sections.push(renderDiagnosticSection("Unreachable", unreachable));
   sections.push(renderDiagnosticSection("Recursive cycles", cycles));
   sections.push(renderDiagnosticSection("Loop risks", loopRisks));
   sections.push(renderDiagnosticSection("Dead code", deadCode));
+  sections.push(renderDiagnosticSection("Over 80 columns", longLines));
   sections.push(renderDiagnosticSection("Cleanup bypass", cleanup));
   return sections.join("");
 }

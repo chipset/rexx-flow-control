@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.1.12
+- Added a feature to detect TSO calls in double-quotes (")
 
 ## 0.1.11
 - Added new help
