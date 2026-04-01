@@ -1,10 +1,75 @@
 const vscode = require("vscode");
+const crypto = require("node:crypto");
 const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const { parseRexxControlFlow, toDot, toExcalidraw } = require("./parser");
 
 const SUPPORTED_LANGS = new Set(["rexx", "REXX"]);
+const MAX_WEBVIEW_PAYLOAD_BYTES = 5 * 1024 * 1024;
+
+function createNonce() {
+  return crypto.randomBytes(16).toString("base64").replace(/[^a-z0-9]/gi, "");
+}
+
+function createGraphWebviewOptions() {
+  return {
+    enableScripts: true,
+    localResourceRoots: []
+  };
+}
+
+function buildWebviewCsp(scriptNonce) {
+  return [
+    "default-src 'none'",
+    "base-uri 'none'",
+    "form-action 'none'",
+    "object-src 'none'",
+    "frame-src 'none'",
+    "connect-src 'none'",
+    "font-src 'none'",
+    "img-src data: blob:",
+    "media-src 'none'",
+    "style-src 'unsafe-inline'",
+    `script-src 'nonce-${scriptNonce}'`
+  ].join("; ");
+}
+
+function normalizeGraphWebviewMessage(message) {
+  if (!message || typeof message !== "object" || Array.isArray(message)) {
+    return null;
+  }
+
+  switch (message.type) {
+    case "revealLine": {
+      const line = Math.trunc(Number(message.line));
+      return { type: "revealLine", line: Number.isFinite(line) && line > 0 ? line : 1 };
+    }
+    case "exportGraphJson":
+    case "exportDot":
+    case "exportExcalidraw":
+      return { type: message.type };
+    case "exportSvg":
+      if (
+        typeof message.svg === "string" &&
+        Buffer.byteLength(message.svg, "utf8") <= MAX_WEBVIEW_PAYLOAD_BYTES
+      ) {
+        return { type: "exportSvg", svg: message.svg };
+      }
+      return null;
+    case "exportPng":
+      if (
+        typeof message.png === "string" &&
+        /^data:image\/png;base64,[a-z0-9+/=]+$/i.test(message.png) &&
+        Buffer.byteLength(message.png, "utf8") <= MAX_WEBVIEW_PAYLOAD_BYTES
+      ) {
+        return { type: "exportPng", png: message.png };
+      }
+      return null;
+    default:
+      return null;
+  }
+}
 
 function activate(context) {
   let graphPanel = null;
@@ -68,7 +133,7 @@ function activate(context) {
         "rexxControlFlow",
         `REXX Control Flow: ${path.basename(doc.fileName)}`,
         vscode.ViewColumn.Beside,
-        { enableScripts: true }
+        createGraphWebviewOptions()
       );
 
       graphPanel.onDidDispose(() => {
@@ -82,14 +147,15 @@ function activate(context) {
       });
 
       graphPanel.webview.onDidReceiveMessage(async (msg) => {
-        if (!msg || !graphDocumentUri) {
+        const message = normalizeGraphWebviewMessage(msg);
+        if (!message || !graphDocumentUri) {
           return;
         }
 
-        if (msg.type === "revealLine") {
-          const line = Math.max(1, Number(msg.line) || 1);
+        if (message.type === "revealLine") {
           const targetUri = graphDocumentUri;
           const docTarget = await vscode.workspace.openTextDocument(targetUri);
+          const line = Math.min(docTarget.lineCount, message.line);
           const editor = await vscode.window.showTextDocument(docTarget, vscode.ViewColumn.One);
           const position = new vscode.Position(line - 1, 0);
           const range = new vscode.Range(position, position);
@@ -103,28 +169,28 @@ function activate(context) {
           return;
         }
 
-        if (msg.type === "exportGraphJson") {
+        if (message.type === "exportGraphJson") {
           await exportJsonFromDocument(docTarget);
           return;
         }
 
-        if (msg.type === "exportDot") {
+        if (message.type === "exportDot") {
           await exportDotFromDocument(docTarget);
           return;
         }
 
-        if (msg.type === "exportExcalidraw") {
+        if (message.type === "exportExcalidraw") {
           await exportExcalidrawFromDocument(docTarget);
           return;
         }
 
-        if (msg.type === "exportSvg" && typeof msg.svg === "string") {
-          await exportSvgFromDocument(docTarget, msg.svg);
+        if (message.type === "exportSvg") {
+          await exportSvgFromDocument(docTarget, message.svg);
           return;
         }
 
-        if (msg.type === "exportPng" && typeof msg.png === "string") {
-          await exportPngFromDocument(docTarget, msg.png);
+        if (message.type === "exportPng") {
+          await exportPngFromDocument(docTarget, message.png);
         }
       });
     }
@@ -134,7 +200,13 @@ function activate(context) {
 
     graphDocumentUri = doc.uri;
     graphPanel.title = `REXX Control Flow: ${path.basename(doc.fileName)}`;
-    graphPanel.webview.html = renderGraphHtml(graph, doc.fileName, customCss, defaultViewMode);
+    graphPanel.webview.html = renderGraphHtml(
+      graph,
+      doc.fileName,
+      customCss,
+      defaultViewMode,
+      createNonce()
+    );
 
     const activeEditor = vscode.window.activeTextEditor;
     if (activeEditor && activeEditor.document.uri.toString() === doc.uri.toString()) {
@@ -454,7 +526,13 @@ function sanitizeCss(cssText) {
   return String(cssText || "").replace(/<\/style/gi, "<\\/style");
 }
 
-function renderGraphHtml(graph, fileName, customCss = "", defaultViewMode = "graph") {
+function renderGraphHtml(
+  graph,
+  fileName,
+  customCss = "",
+  defaultViewMode = "graph",
+  scriptNonce = createNonce()
+) {
   const nodes = Array.isArray(graph.nodes) ? graph.nodes : [];
   const edges = Array.isArray(graph.edges) ? graph.edges : [];
   const analysis = graph.analysis || {};
@@ -521,9 +599,10 @@ function renderGraphHtml(graph, fileName, customCss = "", defaultViewMode = "gra
       const flagChips = (node.flags || [])
         .map((flag) => `<span class="flag-chip flag-${escapeHtml(flag)}">${escapeHtml(flag)}</span>`)
         .join("");
+      const nodeCategory = nodeCategoryForKind(node.kind || "");
       return `<button class="node ${nodeClassName(node)}" data-line="${node.line}" data-kind="${escapeHtml(
         node.kind || ""
-      )}" data-node-id="${escapeHtml(node.id)}" data-section-id="${escapeHtml(
+      )}" data-node-category="${escapeHtml(nodeCategory)}" data-node-id="${escapeHtml(node.id)}" data-section-id="${escapeHtml(
         node.sectionId || ""
       )}" data-cycle-id="${escapeHtml(node.cycleId || "")}" style="left:${pos.x}px;top:${pos.y}px" title="Click to focus, double-click to jump to line ${node.line}">
         <div class="node-head">
@@ -562,6 +641,7 @@ function renderGraphHtml(graph, fileName, customCss = "", defaultViewMode = "gra
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="${buildWebviewCsp(scriptNonce)}" />
   <title>REXX Call Graph</title>
   <style>
     :root {
@@ -1154,7 +1234,7 @@ function renderGraphHtml(graph, fileName, customCss = "", defaultViewMode = "gra
     </div>
   </div>
 
-  <script>
+  <script nonce="${scriptNonce}">
     const vscode = acquireVsCodeApi();
     const graphData = ${graphDataJson};
 
@@ -1272,10 +1352,12 @@ function renderGraphHtml(graph, fileName, customCss = "", defaultViewMode = "gra
       nodes.forEach((node) => {
         const text = node.getAttribute('data-node-id') || '';
         const matchesSearch = !searchTerm || text.includes(searchTerm);
+        const category = node.getAttribute('data-node-category') || '';
+        const hiddenByCategory = Boolean(category && !filters[category]);
         const hiddenByGroup = collapsedGroupIds.has(groupIdForNode(node));
         const hiddenByFocus =
           focusModeEnabled && selectedCaller && !focusNodeIds.has(node.getAttribute('data-node-id'));
-        const hidden = hiddenByGroup || hiddenByFocus;
+        const hidden = hiddenByCategory || hiddenByGroup || hiddenByFocus;
         node.classList.toggle('hidden', hidden);
         node.classList.toggle('search-hit', matchesSearch && !hidden && Boolean(searchTerm));
         node.classList.toggle('selected', node.getAttribute('data-node-id') === selectedCaller);
@@ -1874,6 +1956,19 @@ function edgeCategoryForType(type) {
   return "call";
 }
 
+function nodeCategoryForKind(kind) {
+  if (kind === "external-program") {
+    return "external";
+  }
+  if (kind === "tso-command") {
+    return "tso";
+  }
+  if (kind === "dynamic-call" || kind === "dynamic-jump") {
+    return "dynamic";
+  }
+  return "";
+}
+
 function renderDiagnosticsHtml(analysis) {
   const sections = [];
   const unreachable = (analysis.unreachableProcedures || []).map((id) => ({
@@ -1987,5 +2082,11 @@ function deactivate() {}
 
 module.exports = {
   activate,
-  deactivate
+  deactivate,
+  buildWebviewCsp,
+  createGraphWebviewOptions,
+  createNonce,
+  nodeCategoryForKind,
+  normalizeGraphWebviewMessage,
+  sanitizeCss
 };

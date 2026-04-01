@@ -99,6 +99,7 @@ Right-click editor context menu focuses on graph generation (export actions are 
 
 ## Notes
 
+- The extension is local-only: it analyzes the active REXX document inside VS Code and does not require authentication, accounts, or cloud access.
 - Diagnostics now use additional statement-level analysis inside each procedure to detect dead code and some loop/exit risks.
 - Supported file/language IDs: `rexx`, `REXX`, and common file extensions (`.rexx`, `.rex`, `.exec`).
 - Works great with the Broadcom Rexx LSP.
