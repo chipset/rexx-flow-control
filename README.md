@@ -2,7 +2,9 @@
 
 REXX Control Flow is a VS Code extension that visualizes a procedure-level call graph for REXX and layers control-flow diagnostics on top of it.
 
-![graph](https://raw.githubusercontent.com/chipset/rexx-flow-control/e8c454086a01e882a79ab55fea3a27ab5325d0c7/images/flow.png)
+![graph layout controls](images/flow-layout-controls.png)
+
+_The screenshot highlights the pinned-node lock badge and the manual layout controls for pinning, unpinning, reset layout, and snap-to-grid._
 
 ## Features
 
@@ -36,6 +38,10 @@ REXX Control Flow is a VS Code extension that visualizes a procedure-level call 
   - Reset zoom button.
   - Mouse panning
   - Back/forward history and focused-procedure mode
+  - Drag nodes to make custom layouts while connection lines stay attached
+  - Pin moved nodes so their positions persist across rerenders and panel reopen
+  - Snap-to-grid toggle for cleaner manual layouts
+  - Reset & unlock to restore the automatic graph arrangement
   - JSON, DOT, Excalidraw, SVG, and PNG export buttons in the graph view.
 - Editor-native shortcuts:
   - CodeLens actions for opening the graph, the workspace graph, JSON export, and PNG export.
@@ -92,6 +98,23 @@ Right-click editor context menu focuses on graph generation (export actions are 
   - Filter TSO command edges separately
   - Group by logical section, recursion cycle, node kind, or file
   - Collapse/expand groups for large programs
+  - Drag any node to reposition it in the canvas
+  - Pinned nodes show a lock badge (`🔒`)
+  - Use **Pin \<node\>** / **Unpin \<node\>** for the selected node
+  - Enable **snap to grid** before dragging if you want tidy alignment
+  - Use **Reset & unlock** to clear custom positions and return to auto-layout
+
+## Manual layout instructions
+
+1. Open the graph view.
+2. Drag a node to move it.
+3. The node becomes pinned and keeps its position for later sessions.
+4. Use the lock badge (`🔒`) as the visual cue that a node is pinned.
+5. Select a node and use **Pin** or **Unpin** in Graph Controls for explicit control.
+6. Turn on **snap to grid** before dragging if you want aligned spacing.
+7. Use **Reset & unlock** to remove all pinned positions and restore the generated layout.
+
+Manual layouts are also reflected in SVG and PNG exports.
 
 ## Settings
 

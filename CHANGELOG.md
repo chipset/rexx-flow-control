@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.14
+- Added movable graph nodes with live connector updates.
+- Added pin/unpin controls, lock badges, and persisted manual node positions.
+- Added snap-to-grid and reset-layout controls for manual graph arrangement.
+- Updated SVG/PNG exports to use the current manual layout.
+
 ## 0.1.13
 - Fixed horizontal scroll bug
 

@@ -1,8 +1,8 @@
 {
   "name": "rexx-control-flow",
   "displayName": "REXX Control Flow",
-  "description": "Visualize REXX procedure graphs with control-flow diagnostics and exports.",
-  "version": "0.1.13",
+  "description": "Visualize REXX procedure graphs with movable, pinnable nodes, snap-to-grid layout controls, diagnostics, and exports.",
+  "version": "0.1.14",
   "publisher": "TMcQ",
   "repository": {
     "type": "git",
@@ -124,7 +124,8 @@
     "CHANGELOG.md",
     "LICENSE.md",
     "package.json",
-    "images/icon.png"
+    "images/icon.png",
+    "images/flow-layout-controls.png"
   ],
   "license": "MIT",
   "devDependencies": {
