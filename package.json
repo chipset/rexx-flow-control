@@ -2,7 +2,7 @@
   "name": "rexx-control-flow",
   "displayName": "REXX Control Flow",
   "description": "Visualize REXX procedure graphs with control-flow diagnostics and exports.",
-  "version": "0.1.12",
+  "version": "0.1.13",
   "publisher": "TMcQ",
   "repository": {
     "type": "git",
@@ -25,9 +25,12 @@
     "onLanguage:rexx",
     "onLanguage:REXX",
     "onCommand:rexxFlow.showControlGraph",
+    "onCommand:rexxFlow.showWorkspaceControlGraph",
     "onCommand:rexxFlow.exportGraphJson",
     "onCommand:rexxFlow.exportDot",
-    "onCommand:rexxFlow.exportExcalidraw"
+    "onCommand:rexxFlow.exportExcalidraw",
+    "onCommand:rexxFlow.exportSvg",
+    "onCommand:rexxFlow.exportPng"
   ],
   "icon": "images/icon.png",
   "main": "./extension.js",
@@ -37,6 +40,11 @@
         "command": "rexxFlow.showControlGraph",
         "category": "REXX Control Flow",
         "title": "Generate REXX Control Flow"
+      },
+      {
+        "command": "rexxFlow.showWorkspaceControlGraph",
+        "category": "REXX Control Flow",
+        "title": "Generate Workspace REXX Control Flow"
       },
       {
         "command": "rexxFlow.exportGraphJson",
@@ -52,6 +60,16 @@
         "command": "rexxFlow.exportExcalidraw",
         "category": "REXX Control Flow",
         "title": "Export REXX Control Flow to Excalidraw"
+      },
+      {
+        "command": "rexxFlow.exportSvg",
+        "category": "REXX Control Flow",
+        "title": "Export REXX Control Flow to SVG"
+      },
+      {
+        "command": "rexxFlow.exportPng",
+        "category": "REXX Control Flow",
+        "title": "Export REXX Control Flow to PNG"
       }
     ],
     "menus": {
@@ -69,7 +87,7 @@
         "rexxFlow.customCssFile": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Optional path to a `.css` file used to override the control-flow webview styling. Relative paths resolve from the current workspace folder.",
+          "markdownDescription": "Optional path to a `.css` file used to override the control-flow webview styling. Relative paths resolve from the current workspace folder and are disabled in untrusted workspaces. Files larger than 64 KB are ignored.",
           "scope": "resource"
         },
         "rexxFlow.defaultView": {
@@ -86,11 +104,21 @@
     }
   },
   "scripts": {
-    "lint": "echo 'No lint configured'",
-    "test": "node --test"
+    "lint": "node scripts/lint.js",
+    "syntax-check": "node --check extension.js && node --check lib/shared.js && node --check lib/host-analysis.js && node --check lib/host-analysis.test.js && node --check lib/webview.js && node --check lib/webview-render.js && node --check lib/webview-support.js && node --check parser.js && node --check extension.test.js && node --check extension.integration.test.js && node --check parser.test.js && node --check vscode-test/runTest.js && node --check vscode-test/index.js && node --check vscode-test/extension-host.js",
+    "smoke": "node --test extension.integration.test.js",
+    "test:vscode": "node vscode-test/runTest.js",
+    "test": "node --test",
+    "verify": "npm run lint && npm run syntax-check && npm run smoke && npm test",
+    "verify:full": "npm run verify && npm run test:vscode"
   },
   "files": [
     "extension.js",
+    "lib/shared.js",
+    "lib/host-analysis.js",
+    "lib/webview.js",
+    "lib/webview-render.js",
+    "lib/webview-support.js",
     "parser.js",
     "README.md",
     "CHANGELOG.md",
@@ -98,5 +126,8 @@
     "package.json",
     "images/icon.png"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "@vscode/test-electron": "^2.5.2"
+  }
 }

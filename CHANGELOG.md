@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.1.13
+- Fixed horizontal scroll bug
+
 ## 0.1.12
 - Added a feature to detect TSO calls in double-quotes (")
 
