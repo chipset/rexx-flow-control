@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.0
+
+- Aligned packaged version metadata with the current extension release.
+- Refreshed product and technical documentation to match the current graph UI and persistence model.
+- Removed unused repository artifacts that were no longer referenced by the extension or docs.
+
 ## 0.1.14
 
 - Added the new interactive graph view with left module navigation, central canvas, and right inspector.

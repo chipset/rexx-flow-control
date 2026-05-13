@@ -82,7 +82,7 @@ Responsibilities:
 Responsibilities:
 - generate the full webview HTML
 - embed graph UI runtime logic
-- handle layout switching, search highlighting, zoom, panning, manual node movement, persistence messaging, and export triggers
+- handle layout switching, search highlighting, zoom, panning, module visibility toggles, subtree collapse/expand, manual node movement, persistence messaging, and export triggers
 
 ### 3.6 `lib/webview-support.js`
 Responsibilities:
@@ -252,11 +252,26 @@ Each session tracks:
 - render timer
 - render nonce
 - persisted UI state key
+- persisted node-position state for manual layout restoration
 
 ### 7.3 Session lifecycle
 - created on demand
 - updated on render/refresh
 - cleaned up on panel disposal
+
+### 7.4 Persistence scope
+Persisted UI state is intentionally narrow.
+
+Currently durable state includes:
+- selected caller metadata
+- saved manual node positions
+
+The renderer also maintains transient in-memory state during a session for:
+- active layout
+- zoom/pan transform
+- search text
+- visible modules
+- subtree collapse state
 
 ### 7.4 Cache model
 The host keeps a bounded graph cache keyed by:

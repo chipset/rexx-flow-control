@@ -109,11 +109,11 @@ The graph UI supports:
 - node selection
 - synchronized left-panel, graph, and inspector selection
 - search highlighting
-- history back/forward
+- layout switching (`tree`, `layered`, `radial`)
 - zoom in/out/fit
 - mouse panning
-- grouping and collapse/expand
-- edge filtering
+- module visibility toggles
+- subtree collapse/expand
 - right-click export actions
 - opt-in node movement and reset view
 
@@ -145,14 +145,11 @@ Exports are available from:
 ### 6.8 UI persistence
 The extension persists graph UI state across panel recreation, including:
 - selected caller
-- zoom level
-- search term
-- group mode
-- collapsed groups
-- active filters
-- history state
-- view mode
 - moved node positions
+
+Notes:
+- The current renderer persists saved node positions as the primary durable layout state.
+- Other transient UI state may reset between renders or sessions.
 
 ---
 
@@ -219,13 +216,9 @@ The graph UI uses:
 - dashed inferred cross-file edges
 - red uncalled-function highlighting when non-root functions have no incoming calls
 
-### Modes
-- **Graph mode**: focused graph view
-- **Detailed mode**: graph plus diagnostics and controls
-
 ### Interaction expectations
 - wide graphs remain navigable by horizontal panning and zoom
-- large graphs remain searchable and groupable
+- large graphs remain searchable and can be narrowed by visible module selection or subtree collapse
 - source-code navigation remains available from graph interactions
 
 ---
