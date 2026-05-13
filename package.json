@@ -1,8 +1,8 @@
 {
   "name": "rexx-control-flow",
   "displayName": "REXX Control Flow",
-  "description": "Visualize REXX procedure graphs with control-flow diagnostics and exports.",
-  "version": "0.1.10",
+  "description": "Visualize REXX procedure graphs with an interactive new view, diagnostics, workspace graphs, and exports.",
+  "version": "0.1.14",
   "publisher": "TMcQ",
   "repository": {
     "type": "git",
@@ -87,7 +87,7 @@
         "rexxFlow.customCssFile": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Optional path to a `.css` file used to override the control-flow webview styling. Relative paths resolve from the current workspace folder.",
+          "markdownDescription": "Optional path to a `.css` file used to override the control-flow webview styling. Relative paths resolve from the current workspace folder and are disabled in untrusted workspaces. Files larger than 64 KB are ignored.",
           "scope": "resource"
         },
         "rexxFlow.defaultView": {
@@ -104,8 +104,13 @@
     }
   },
   "scripts": {
-    "lint": "echo 'No lint configured'",
+    "lint": "node scripts/lint.js",
+    "syntax-check": "node --check extension.js && node --check lib/shared.js && node --check lib/host-analysis.js && node --check lib/host-analysis.test.js && node --check lib/webview.js && node --check lib/webview-render.js && node --check lib/webview-support.js && node --check parser.js && node --check extension.test.js && node --check extension.integration.test.js && node --check parser.test.js && node --check vscode-test/runTest.js && node --check vscode-test/index.js && node --check vscode-test/extension-host.js",
+    "smoke": "node --test extension.integration.test.js",
+    "test:vscode": "node vscode-test/runTest.js",
     "test": "node --test",
+    "verify": "npm run lint && npm run syntax-check && npm run smoke && npm test",
+    "verify:full": "npm run verify && npm run test:vscode",
     "package:vsix": "npx --yes @vscode/vsce package"
   },
   "files": [
@@ -116,7 +121,12 @@
     "CHANGELOG.md",
     "LICENSE.md",
     "package.json",
-    "images/icon.png"
+    "images/icon.png",
+    "images/flow.png",
+    "images/flow-layout-controls.png"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "@vscode/test-electron": "^2.5.2"
+  }
 }

@@ -1,50 +1,37 @@
 # REXX Control Flow
 
-REXX Control Flow is a VS Code extension that visualizes a procedure-level call graph for REXX and layers control-flow diagnostics on top of it.
+REXX Control Flow is a VS Code extension that visualizes procedure-level REXX call graphs and layers control-flow diagnostics on top of them.
+
+![graph view](images/flow.png)
 
 ## Features
 
 - Generate an interactive call graph from the active REXX editor.
-- Auto-refresh the graph when source content changes or is saved.
-- Show diagnostics for undefined labels, unreachable procedures, recursive cycles, dead code after unconditional exits, and likely loop risks.
+- Generate a workspace-wide graph across supported REXX files.
+- Auto-refresh open document graphs when source content changes or is saved.
+- Refresh workspace graphs when supported documents are opened, closed, changed, or saved.
+- Surface diagnostics in both the graph and VS Code Problems panel.
+- Show diagnostics for undefined labels, unreachable procedures, recursive cycles, dead code after unconditional exits, likely loop risks, cleanup bypass risks, and source lines over 80 columns.
 - Show per-procedure complexity and fan-in/fan-out metrics.
-- Search, filter, group, and collapse large graphs.
-- Persist graph UI state such as zoom, filters, focus mode, and group selection while the webview stays open.
-- Keep graph and editor in sync:
-  - Selecting a function in the editor moves focus/highlighting in the graph.
-  - Clicking a graph node jumps to the function line in the editor.
-- Dynamic line highlighting:
-  - Selecting a caller highlights its outgoing call lines.
-  - If selected function has no outgoing calls, incoming call lines are highlighted.
-- Signal handlers are visually distinct:
-  - `SIGNAL ON ... NAME handler` targets are shown as red boxes.
-- External LINKMVS program calls are visually distinct:
-  - `ADDRESS LINKMVS "program"` adds a blue external-program node using the quoted program name.
-- Unused procedures are highlighted
-  - Shows procedures not used
-- Built-in graph navigation tools:
-  - Scroll/trackpad zoom in the graph canvas.
-  - Reset zoom button.
-  - Mouse panning
-  - Back/forward history and focused-procedure mode
-  - JSON, DOT, Excalidraw, SVG, and PNG export buttons in the graph view.
-- Export call graph data:
-  - JSON export.
-  - DOT export (Graphviz format).
-  - Excalidraw export opened as an untitled `.excalidraw` document.
+- Search functions without losing input focus while typing.
+- Keep the left module list, main graph, and right inspector synchronized when a function is selected from any of those surfaces.
+- Highlight functions that are not called by another node in red; the legend shows this only when uncalled functions exist.
+- Persist moved node positions across graph rerenders and panel recreation.
+- Export JSON, DOT, Excalidraw, SVG, and PNG.
+- Provide CodeLens shortcuts for graph generation, workspace graph generation, JSON export, and PNG export.
 
-## Supported graph constructs
+## Supported Graph Constructs
 
-- Labels (`label:`) as function entries
-- `CALL label` as function-to-function edges
-- Function-style expression calls such as `Func(...)`, including calls to labels defined later in the file
-- Negated expression calls such as `\Func(...)`
-- Dynamic calls (`CALL VALUE ...`, `CALL (...)`) grouped as `DYNAMIC_CALL`
-- `SIGNAL ON ... NAME handler` as `signal-on` edges and signal-handler node tagging
-- `ADDRESS LINKMVS "program"` / `ADDRESS LINKMVS 'program'` as `external-call` edges to external-program nodes
-- Multiple statements per line separated by `;` (quote-aware splitting)
-- Block/in-line comment stripping for parsing
-
+- Labels (`label:`) as function entries.
+- `CALL label` as function-to-function edges.
+- Function-style expression calls such as `Func(...)`, including calls to labels defined later in the file.
+- Negated expression calls such as `\Func(...)`.
+- Dynamic calls (`CALL VALUE ...`, `CALL (...)`) grouped as `DYNAMIC_CALL`.
+- `SIGNAL ON ... NAME handler` as `signal-on` edges and signal-handler node tagging.
+- `ADDRESS LINKMVS "program"` / `ADDRESS LINKMVS 'program'` as external-program nodes.
+- Paired double-quoted TSO command statements as TSO command nodes, including quoted text continued across lines.
+- Multiple statements per line separated by `;` with quote-aware splitting.
+- Block and inline comment stripping before parsing.
 
 ## Usage
 
@@ -54,45 +41,90 @@ REXX Control Flow is a VS Code extension that visualizes a procedure-level call 
 
 From the command palette, you can also run:
 
+- **REXX Control Flow: Generate REXX Control Flow**
+- **REXX Control Flow: Generate Workspace REXX Control Flow**
 - **REXX Control Flow: Export REXX Control Flow to JSON**
 - **REXX Control Flow: Export REXX Control Flow to DOT**
 - **REXX Control Flow: Export REXX Control Flow to Excalidraw**
+- **REXX Control Flow: Export REXX Control Flow to SVG**
+- **REXX Control Flow: Export REXX Control Flow to PNG**
 
-Right-click editor context menu focuses on graph generation (export actions are in the graph toolbar).
+The editor context menu focuses on graph generation. Export actions are available from the command palette and from the graph view right-click menu.
 
-## Graph behavior details
+## Graph View
 
-- Node color:
-  - Standard functions: neutral styling
-  - Signal handlers (`SIGNAL ON ... NAME ...`): red styling
-  - External LINKMVS programs: blue styling
-- Edge color:
-  - Calls are colored by target function for easier visual grouping
-- Selection behavior:
-  - Click node once to focus and highlight relevant call lines
-  - Click another node to switch highlighted relationship context
-- Graph controls:
-  - Filter calls, signals, external calls, and dynamic calls
-  - Group by logical section, recursion cycle, node kind, or file
-  - Collapse/expand groups for large programs
+- The graph opens with module navigation on the left, the graph canvas in the center, and an inspector on the right.
+- Select a function from the left module list, the main graph, or the right inspector to update all three areas together.
+- Use the layout switcher to choose `tree`, `layered`, or `radial`.
+- The graph always uses regular node spacing; compact/comfy density controls are intentionally not exposed.
+- Scroll or trackpad zooms the graph canvas.
+- Drag empty canvas space to pan.
+- Use the fit button to reset the viewport.
+- Search highlights matching functions in place without rebuilding the whole view.
+- Relationship lines use flowing curves consistently across layouts.
+
+## Manual Layout
+
+Manual movement is opt-in so accidental drags do not disturb the graph.
+
+1. Right-click the graph canvas.
+2. Choose **Allow Node Movement**.
+3. Drag nodes with the left mouse button.
+4. Release the mouse button to stop movement and save the new position.
+5. Right-click and choose **Disable Node Movement** to turn movement back off.
+
+Moved node positions persist for subsequent renders of the same graph. Right-click and choose **Reset View** to clear saved node positions, disable movement, recompute the automatic layout, and refit the graph.
+
+## Visual Language
+
+- Standard functions use neutral node styling.
+- Signal handlers are visually distinct through parser flags.
+- External LINKMVS programs and TSO command strings are filterable external-style nodes.
+- Functions not called by another node are highlighted in red and marked with `!`.
+- `MAIN` and `WORKSPACE` are treated as root nodes and are not marked uncalled.
+- The legend lists modules and only shows **Uncalled function** when at least one non-root uncalled node exists.
+
+## Workspace Graphs
+
+Workspace graphs scan supported files in the current workspace using `**/*.{rex,rexx,exec,REX,REXX,EXEC}` while excluding `node_modules`, `.git`, `.omx`, and `.codex`.
+
+Workspace graphs aggregate per-file analysis and infer a subset of cross-file calls when there is a unique matching target. They are not a full semantic whole-program resolver.
 
 ## Settings
 
-- `rexxFlow.customCssFile`: Optional path to a `.css` file that overrides the graph webview look and feel. Use an absolute path or a workspace-relative path.
+- `rexxFlow.customCssFile`: Optional path to a `.css` file that overrides the graph webview styling. Relative paths resolve from the current workspace folder, are disabled in untrusted workspaces, must use the `.css` extension, and files larger than 64 KB are ignored.
 - `rexxFlow.defaultView`: Choose whether the webview opens in `graph` mode or `detailed` mode. Graph mode keeps diagnostics and advanced controls collapsed by default.
+
+Custom CSS is sanitized before injection into the webview. External imports, URL-based assets, and legacy executable CSS constructs are stripped.
 
 ## Exports
 
 - JSON: Raw node/edge data for tooling or automation.
-- DOT: Use with Graphviz tools (`dot`, `neato`, etc.).
-- Excalidraw: Produces Excalidraw JSON in `.excalidraw` format.
-- All exports use a Save dialog with defaults from the active REXX file:
-  - default folder: same folder as the source REXX file
-  - default file name: source file base name
-  - extension set by export type (`.json`, `.dot`, `.excalidraw`, `.svg`, `.png`)
+- DOT: Graphviz format.
+- Excalidraw: Excalidraw JSON in `.excalidraw` format.
+- SVG and PNG: Rendered from the current graph view.
+
+All exports use a Save dialog with defaults from the active REXX file:
+
+- Default folder: same folder as the source REXX file.
+- Default file name: source file base name.
+- Extension set by export type: `.json`, `.dot`, `.excalidraw`, `.svg`, or `.png`.
+
+## Testing
+
+- `npm test`: fast Node-based unit and mocked integration tests.
+- `npm run lint`: repository lint checks.
+- `npm run syntax-check`: JavaScript syntax checks for extension, parser, renderer, and test harness files.
+- `npm run smoke`: mocked VS Code-host smoke checks.
+- `npm run test:vscode`: real VS Code extension-host harness using `@vscode/test-electron`.
+- `npm run verify`: local quality gates without launching VS Code.
+- `npm run verify:full`: full verification including the VS Code harness.
+- `npm run package:vsix`: package the extension as a `.vsix` file.
+
+GitHub Actions runs `npm run verify` and the real VS Code harness under `xvfb` on Ubuntu.
 
 ## Notes
 
-- The main canvas is still a higher-level procedure/call graph, not a full rendered statement-by-statement CFG.
-- Diagnostics now use additional statement-level analysis inside each procedure to detect dead code and some loop/exit risks.
-- Supported file/language IDs: `rexx`, `REXX`, and common file extensions (`.rexx`, `.rex`, `.exec`).
+- The main canvas is a procedure/call graph, not a full rendered statement-by-statement CFG.
+- Diagnostics use statement-level analysis inside each procedure to detect dead code and some loop/exit risks.
+- Supported language IDs and extensions: `rexx`, `REXX`, `.rexx`, `.rex`, and `.exec`.

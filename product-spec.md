@@ -107,18 +107,21 @@ Supported categories:
 ### 6.4 Interactive graph navigation
 The graph UI supports:
 - node selection
-- focus mode
-- search stepping
+- synchronized left-panel, graph, and inspector selection
+- search highlighting
 - history back/forward
-- zoom in/out/reset
+- zoom in/out/fit
 - mouse panning
 - grouping and collapse/expand
 - edge filtering
 - graph-only and detailed modes
+- right-click export actions
+- opt-in node movement and reset view
 
 ### 6.5 Graph/editor synchronization
 - editor selection updates graph focus
 - graph-node interaction reveals source lines
+- graph-node selection updates the left module panel and right inspector
 - workspace graph nodes can open the correct file and line
 
 ### 6.6 Editor-native integration
@@ -149,8 +152,8 @@ The extension persists graph UI state across panel recreation, including:
 - collapsed groups
 - active filters
 - history state
-- focus mode
 - view mode
+- moved node positions
 
 ---
 
@@ -221,12 +224,14 @@ Purpose:
 
 ### Graph presentation
 The graph UI uses:
-- card-based nodes
-- grouped stat cards
-- detailed control panels
+- a left module panel, central graph canvas, and right inspector
+- card-based nodes sized to show function names
+- selectable tree, layered, and radial layouts
+- regular spacing without user-selectable density modes
 - file-aware metadata
 - visually distinct special node classes
 - dashed inferred cross-file edges
+- red uncalled-function highlighting when non-root functions have no incoming calls
 
 ### Modes
 - **Graph mode**: focused graph view

@@ -82,7 +82,7 @@ Responsibilities:
 Responsibilities:
 - generate the full webview HTML
 - embed graph UI runtime logic
-- handle filtering, grouping, zoom, panning, persistence messaging, and export triggers
+- handle layout switching, search highlighting, zoom, panning, manual node movement, persistence messaging, and export triggers
 
 ### 3.6 `lib/webview-support.js`
 Responsibilities:
@@ -278,20 +278,25 @@ The graph UI combines:
 - HTML button nodes for interaction
 
 ### 8.2 Layout model
-The graph uses a layered north/south layout with:
-- ordered nodes
-- edge-aware layer adjustments
-- absolute positioning
+The graph supports multiple generated layouts:
+- tree
+- layered
+- radial
+
+All modes use regular spacing and absolute positioning. User-selectable compact/comfy density modes are intentionally not exposed.
 
 ### 8.3 Runtime UI capabilities
 - zooming
 - mouse panning
-- focus mode
-- search
+- search highlighting without full-toolbar rerender
 - navigation history
-- grouping
-- filtering
+- left module navigation
+- right inspector relationships
+- synchronized selection across side panels and graph nodes
 - graph mode / detailed mode switching
+- opt-in manual node movement from the right-click menu
+- reset view from the right-click menu
+- conditional uncalled-function legend row when non-root uncalled functions exist
 
 ### 8.4 Workspace-specific UI behavior
 - file-aware node metadata
@@ -300,7 +305,7 @@ The graph uses a layered north/south layout with:
 - dashed inferred cross-file edges
 
 ### 8.5 Persisted webview state
-The webview sends normalized state updates back to the host for workspace-backed persistence.
+The webview sends normalized state updates back to the host for workspace-backed persistence. Persisted state includes moved node positions so manual layouts survive later renders.
 
 ---
 
