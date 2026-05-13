@@ -158,6 +158,7 @@ test('renders graph mode fit logic with movable nodes, pointer interactions, and
   assert.match(html, /if \(\(event\.buttons & 1\) !== 1\) \{/);
   assert.match(html, /window\.addEventListener\('blur'/);
   assert.match(html, /state\.nodePositions\.set\(nodeDrag\.id, next\)/);
+  assert.match(html, /setSelected\(finished\.id\)/);
   assert.match(html, /layoutData = applySavedNodePositions\(computeLayout\(\)\)/);
   assert.match(html, /function resetGraphView\(\) \{/);
   assert.match(html, /function exportPng\(\) \{/);
@@ -188,6 +189,11 @@ test('renders graph mode fit logic with movable nodes, pointer interactions, and
   assert.match(html, /state\.visibleModules\.add\(fn\.module\);/);
   assert.match(html, /data-fn-row-id/);
   assert.match(html, /scrollIntoView\(\{ block: 'nearest' \}\)/);
+  assert.match(html, /const node = el\('div', \{/);
+  assert.match(html, /role: 'button'/);
+  assert.match(html, /tabindex: 0/);
+  assert.match(html, /if \(!state\.movementEnabled\) \{\s*setSelected\(fn\.id\);\s*return;\s*\}/);
+  assert.match(html, /onkeydown: \(event\) => \{/);
   assert.match(html, /\.node\.uncalled/);
   assert.match(html, /const uncalled = !\['MAIN', 'WORKSPACE'\]\.includes\(fn\.id\) && \(REX\.IN_DEGREE\[fn\.id\] \|\| 0\) === 0;/);
   assert.match(html, /title: 'Not called by another node', text: '!'/);
