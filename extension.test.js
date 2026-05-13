@@ -119,7 +119,6 @@ test('renders webview html with nonce-based script and sanitized custom css', ()
     { nodes: [], edges: [], analysis: { metrics: [] } },
     'demo.rex',
     '@import url("https://example.com/a.css"); .node{background:url("x")} </style>',
-    'graph',
     'nonce123'
   );
 
@@ -136,7 +135,6 @@ test('renders graph mode fit logic with movable nodes, pointer interactions, and
     { nodes: [], edges: [], analysis: { metrics: [] } },
     'demo.rex',
     '',
-    'graph',
     'nonce123'
   );
 
@@ -217,7 +215,6 @@ test('adapts graph data into the new module sidebar and inspector view', () => {
     },
     'demo.rex',
     '',
-    'graph',
     'nonce123',
     {
       pinnedNodeIds: ['MAIN'],
@@ -241,7 +238,6 @@ test('hydrates saved node positions in the new graph renderer', () => {
     },
     'demo.rex',
     '',
-    'graph',
     'nonce123',
     {
       nodePositions: { MAIN: { x: 432, y: 210 } }

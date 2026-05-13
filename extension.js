@@ -259,7 +259,6 @@ function activate(context) {
     graph,
     title,
     customCss = "",
-    defaultViewMode = "graph",
     documentUri = null
   }) =>
     runWithErrorMessage(`Unable to render control flow for "${title}".`, async () => {
@@ -274,7 +273,6 @@ function activate(context) {
         graph,
         title,
         customCss,
-        defaultViewMode,
         createNonce(),
         session.persistedState || {}
       );
@@ -300,17 +298,11 @@ function activate(context) {
     if (currentNonce !== session.renderNonce) {
       return null;
     }
-    const defaultViewMode = String(
-      vscode.workspace.getConfiguration("rexxFlow").get("defaultView", "graph")
-    ).trim() === "detailed"
-      ? "detailed"
-      : "graph";
     return renderSession({
       session,
       graph,
       title: path.basename(doc.fileName),
       customCss,
-      defaultViewMode,
       documentUri: doc.uri
     });
   };
@@ -540,17 +532,11 @@ function activate(context) {
         getGraphForDocument
       });
       const customCss = await loadCustomCssForDocument(docs[0]);
-      const defaultViewMode = String(
-        vscode.workspace.getConfiguration("rexxFlow").get("defaultView", "graph")
-      ).trim() === "detailed"
-        ? "detailed"
-        : "graph";
       return renderSession({
         session,
         graph,
         title: `Workspace • ${workspaceFolder.name || "REXX"}`,
         customCss,
-        defaultViewMode,
         documentUri: null
       });
     });
@@ -774,10 +760,7 @@ function activate(context) {
   });
 
   const onConfigChange = vscode.workspace.onDidChangeConfiguration(async (event) => {
-    if (
-      !event.affectsConfiguration("rexxFlow.customCssFile") &&
-      !event.affectsConfiguration("rexxFlow.defaultView")
-    ) {
+    if (!event.affectsConfiguration("rexxFlow.customCssFile")) {
       return;
     }
     if (!sessions.size) {

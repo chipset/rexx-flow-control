@@ -89,16 +89,6 @@
           "default": "",
           "markdownDescription": "Optional path to a `.css` file used to override the control-flow webview styling. Relative paths resolve from the current workspace folder and are disabled in untrusted workspaces. Files larger than 64 KB are ignored.",
           "scope": "resource"
-        },
-        "rexxFlow.defaultView": {
-          "type": "string",
-          "enum": [
-            "graph",
-            "detailed"
-          ],
-          "default": "graph",
-          "markdownDescription": "Default control-flow webview mode. `graph` opens with advanced details collapsed; `detailed` opens the diagnostics and control panels expanded.",
-          "scope": "resource"
         }
       }
     }

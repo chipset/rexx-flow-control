@@ -93,7 +93,6 @@ Workspace graphs aggregate per-file analysis and infer a subset of cross-file ca
 ## Settings
 
 - `rexxFlow.customCssFile`: Optional path to a `.css` file that overrides the graph webview styling. Relative paths resolve from the current workspace folder, are disabled in untrusted workspaces, must use the `.css` extension, and files larger than 64 KB are ignored.
-- `rexxFlow.defaultView`: Choose whether the webview opens in `graph` mode or `detailed` mode. Graph mode keeps diagnostics and advanced controls collapsed by default.
 
 Custom CSS is sanitized before injection into the webview. External imports, URL-based assets, and legacy executable CSS constructs are stripped.
 

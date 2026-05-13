@@ -114,7 +114,6 @@ The graph UI supports:
 - mouse panning
 - grouping and collapse/expand
 - edge filtering
-- graph-only and detailed modes
 - right-click export actions
 - opt-in node movement and reset view
 
@@ -206,19 +205,6 @@ Behavior:
 - file must be `.css`
 - files larger than 64 KB are ignored
 - CSS is sanitized before injection
-
-### `rexxFlow.defaultView`
-Allowed values:
-- `graph`
-- `detailed`
-
-Default:
-- `graph`
-
-Purpose:
-- controls whether the graph opens in graph-only or detailed mode
-
----
 
 ## 10. UX and Visual Design
 

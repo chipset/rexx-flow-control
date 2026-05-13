@@ -593,7 +593,6 @@ test("persisted graph ui state is written to workspace state", async () => {
       navigationHistory: ["MAIN"],
       navigationIndex: 0,
       focusModeEnabled: true,
-      viewMode: "detailed",
       nodePositions: { MAIN: { x: 120, y: 200 } },
       pinnedNodeIds: ["MAIN"],
       snapToGrid: true
@@ -603,7 +602,6 @@ test("persisted graph ui state is written to workspace state", async () => {
   const stored = state.workspaceState.get(`rexxFlow.uiState:${sourceDoc.uri.toString()}`, null);
   assert.equal(stored.selectedCaller, "MAIN");
   assert.equal(stored.groupMode, "file");
-  assert.equal(stored.viewMode, "detailed");
   assert.deepEqual(stored.nodePositions, { MAIN: { x: 120, y: 200 } });
   assert.deepEqual(stored.pinnedNodeIds, ["MAIN"]);
   assert.equal(stored.snapToGrid, true);

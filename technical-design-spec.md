@@ -293,7 +293,6 @@ All modes use regular spacing and absolute positioning. User-selectable compact/
 - left module navigation
 - right inspector relationships
 - synchronized selection across side panels and graph nodes
-- graph mode / detailed mode switching
 - opt-in manual node movement from the right-click menu
 - reset view from the right-click menu
 - conditional uncalled-function legend row when non-root uncalled functions exist
