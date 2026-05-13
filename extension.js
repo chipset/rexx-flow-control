@@ -332,14 +332,20 @@ function activate(context) {
 
     if (message.type === "revealLine") {
       await runWithErrorMessage("Unable to reveal the requested source line.", async () => {
-        const sessionUriStr = session.documentUri ? session.documentUri.toString() : null;
-        const requestedUriStr = message.uri || null;
-        if (requestedUriStr && requestedUriStr !== sessionUriStr) {
-          return;
-        }
-        const targetUri = session.documentUri;
-        if (!targetUri) {
-          return;
+        let targetUri;
+        if (session.documentUri) {
+          // Single-file session: only allow reveals within the session's own document.
+          if (message.uri && message.uri !== session.documentUri.toString()) {
+            return;
+          }
+          targetUri = session.documentUri;
+        } else {
+          // Workspace session: message.uri selects which file to reveal.
+          // shared.js already validates it starts with file://.
+          if (!message.uri) {
+            return;
+          }
+          targetUri = vscode.Uri.parse(message.uri);
         }
         const docTarget = await vscode.workspace.openTextDocument(targetUri);
         const line = Math.min(docTarget.lineCount - 1, message.line);
