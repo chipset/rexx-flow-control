@@ -97,6 +97,10 @@ Workspace graphs aggregate per-file analysis and infer a subset of cross-file ca
 
 Custom CSS is sanitized before injection into the webview. External imports, URL-based assets, and legacy executable CSS constructs are stripped.
 
+This repo includes `rexx-flow-broadcom.css` as a lightweight example theme for the new graph view selectors.
+
+If you used a custom CSS file with an earlier version of the extension, update it for the new graph view DOM. Older selectors such as `.wrap`, `.topbar`, `.controls`, `.node .name`, `.node .meta`, `.edge-group`, and `.zoom-pill` no longer cover the current layout reliably. Prefer the new selectors used by `rexx-flow-broadcom.css`, including `.toolbar`, `.workspace`, `.sidebar`, `.inspector`, `.node-name`, `.edges`, `.legend`, `.context-menu`, `.fn-row`, and `.rel-row`.
+
 ## Exports
 
 - JSON: Raw node/edge data for tooling or automation.

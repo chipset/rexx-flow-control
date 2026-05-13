@@ -121,9 +121,9 @@
     "CHANGELOG.md",
     "LICENSE.md",
     "package.json",
+    "rexx-flow-broadcom.css",
     "images/icon.png",
-    "images/flow.png",
-    "images/flow-layout-controls.png"
+    "images/flow.png"
   ],
   "license": "MIT",
   "devDependencies": {

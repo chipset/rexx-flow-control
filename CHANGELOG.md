@@ -6,6 +6,7 @@
 - Added workspace graph generation across supported REXX files.
 - Added VS Code Problems diagnostics and CodeLens shortcuts.
 - Added safer custom CSS loading with `.css` validation, workspace-trust handling, and a 64 KB size limit.
+- Updated the Broadcom custom CSS sample for the new graph view selectors.
 - Added TSO command detection for paired double-quoted command strings, including continued text across lines.
 - Added 80-column line-length diagnostics.
 - Added right-click graph exports for JSON, DOT, Excalidraw, SVG, and PNG.
