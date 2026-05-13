@@ -105,67 +105,67 @@ function processStatementBlocks(
         }
       }
 
-    recordScopeStatement(scopeStatements, block.scope, segment, block.lineNo);
-    maybeRecordExitRisk(scopeExitStatements, block.scope, segment, block.lineNo);
+      recordScopeStatement(scopeStatements, block.scope, segment, block.lineNo);
+      maybeRecordExitRisk(scopeExitStatements, block.scope, segment, block.lineNo);
 
-    const externalCalls = extractAddressLinkmvsTargets(segment);
-    const upper = segment.toUpperCase();
-    const searchable = maskQuotedText(upper);
-    const signalPattern = /\bSIGNAL\b\s+ON\b(?:\s+[A-Z0-9_.$!?@#]+)?\s+NAME\b\s+([A-Z0-9_.$!?@#]+)/g;
-    const callPattern = /\bCALL\b\s*(VALUE\b|\(|([A-Z0-9_.$!?@#]+))/g;
-    let match;
-    let signalMatch;
+      const externalCalls = extractAddressLinkmvsTargets(segment);
+      const upper = segment.toUpperCase();
+      const searchable = maskQuotedText(upper);
+      const signalPattern = /\bSIGNAL\b\s+ON\b(?:\s+[A-Z0-9_.$!?@#]+)?\s+NAME\b\s+([A-Z0-9_.$!?@#]+)/g;
+      const callPattern = /\bCALL\b\s*(VALUE\b|\(|([A-Z0-9_.$!?@#]+))/g;
+      let match;
+      let signalMatch;
 
-    while ((signalMatch = signalPattern.exec(searchable)) !== null) {
-      const target = normalizeLabel(signalMatch[1]);
-      if (!target || target === "ON" || target === "OFF") {
-        continue;
+      while ((signalMatch = signalPattern.exec(searchable)) !== null) {
+        const target = normalizeLabel(signalMatch[1]);
+        if (!target || target === "ON" || target === "OFF") {
+          continue;
+        }
+        upsertNode(nodes, target, target, block.lineNo, "reference");
+        markSignalHandler(nodes, target);
+        addEdge(edges, edgeKeys, block.scope, target, "signal-on", block.lineNo);
+        recordReference(referenceSites, target, block.scope, block.lineNo, "signal-on");
       }
-      upsertNode(nodes, target, target, block.lineNo, "reference");
-      markSignalHandler(nodes, target);
-      addEdge(edges, edgeKeys, block.scope, target, "signal-on", block.lineNo);
-      recordReference(referenceSites, target, block.scope, block.lineNo, "signal-on");
+
+      for (const targetText of externalCalls) {
+        const normalizedTarget = normalizeExternalTarget(targetText);
+        if (!normalizedTarget) {
+          continue;
+        }
+        const nodeId = `LINKMVS:${normalizedTarget}`;
+        upsertNode(nodes, nodeId, targetText, block.lineNo, "external-program");
+        addEdge(edges, edgeKeys, block.scope, nodeId, "external-call", block.lineNo);
+      }
+
+      while ((match = callPattern.exec(searchable)) !== null) {
+        if (match[1] === "VALUE" || match[1] === "(") {
+          upsertNode(nodes, "DYNAMIC_CALL", "DYNAMIC_CALL", block.lineNo, "dynamic");
+          addEdge(edges, edgeKeys, block.scope, "DYNAMIC_CALL", "calls-dynamic", block.lineNo);
+          continue;
+        }
+
+        const target = normalizeLabel(match[2]);
+        if (target === "ON" || target === "OFF") {
+          continue;
+        }
+
+        upsertNode(nodes, target, target, block.lineNo, "reference");
+        addEdge(edges, edgeKeys, block.scope, target, "calls", block.lineNo);
+        recordReference(referenceSites, target, block.scope, block.lineNo, "calls");
+      }
+
+      const directInvokePattern = /\b([A-Z0-9_.$!?@#]+)\s*\(/g;
+      let direct;
+      while ((direct = directInvokePattern.exec(searchable)) !== null) {
+        const target = normalizeLabel(direct[1]);
+        if (!definedLabels || !definedLabels.has(target) || target === "MAIN") {
+          continue;
+        }
+        upsertNode(nodes, target, target, block.lineNo, "reference");
+        addEdge(edges, edgeKeys, block.scope, target, "calls", block.lineNo);
+        recordReference(referenceSites, target, block.scope, block.lineNo, "calls");
+      }
     }
-
-    for (const targetText of externalCalls) {
-      const normalizedTarget = normalizeExternalTarget(targetText);
-      if (!normalizedTarget) {
-        continue;
-      }
-      const nodeId = `LINKMVS:${normalizedTarget}`;
-      upsertNode(nodes, nodeId, targetText, block.lineNo, "external-program");
-      addEdge(edges, edgeKeys, block.scope, nodeId, "external-call", block.lineNo);
-    }
-
-    while ((match = callPattern.exec(searchable)) !== null) {
-      if (match[1] === "VALUE" || match[1] === "(") {
-        upsertNode(nodes, "DYNAMIC_CALL", "DYNAMIC_CALL", block.lineNo, "dynamic");
-        addEdge(edges, edgeKeys, block.scope, "DYNAMIC_CALL", "calls-dynamic", block.lineNo);
-        continue;
-      }
-
-      const target = normalizeLabel(match[2]);
-      if (target === "ON" || target === "OFF") {
-        continue;
-      }
-
-      upsertNode(nodes, target, target, block.lineNo, "reference");
-      addEdge(edges, edgeKeys, block.scope, target, "calls", block.lineNo);
-      recordReference(referenceSites, target, block.scope, block.lineNo, "calls");
-    }
-
-    const directInvokePattern = /\b([A-Z0-9_.$!?@#]+)\s*\(/g;
-    let direct;
-    while ((direct = directInvokePattern.exec(searchable)) !== null) {
-      const target = normalizeLabel(direct[1]);
-      if (!definedLabels || !definedLabels.has(target) || target === "MAIN") {
-        continue;
-      }
-      upsertNode(nodes, target, target, block.lineNo, "reference");
-      addEdge(edges, edgeKeys, block.scope, target, "calls", block.lineNo);
-      recordReference(referenceSites, target, block.scope, block.lineNo, "calls");
-    }
-  }
   }
 
   if (pendingTso) {

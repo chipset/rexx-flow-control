@@ -1,7 +1,7 @@
 {
   "name": "rexx-control-flow",
   "displayName": "REXX Control Flow",
-  "description": "Visualize REXX procedure graphs with movable, pinnable nodes, snap-to-grid layout controls, diagnostics, and exports.",
+  "description": "Visualize REXX procedure graphs with an interactive new view, diagnostics, workspace graphs, and exports.",
   "version": "0.1.14",
   "publisher": "TMcQ",
   "repository": {
@@ -110,22 +110,20 @@
     "test:vscode": "node vscode-test/runTest.js",
     "test": "node --test",
     "verify": "npm run lint && npm run syntax-check && npm run smoke && npm test",
-    "verify:full": "npm run verify && npm run test:vscode"
+    "verify:full": "npm run verify && npm run test:vscode",
+    "package:vsix": "npx --yes @vscode/vsce package"
   },
   "files": [
     "extension.js",
-    "lib/shared.js",
-    "lib/host-analysis.js",
-    "lib/webview.js",
-    "lib/webview-render.js",
-    "lib/webview-support.js",
+    "lib",
     "parser.js",
     "README.md",
     "CHANGELOG.md",
     "LICENSE.md",
     "package.json",
+    "rexx-flow-broadcom.css",
     "images/icon.png",
-    "images/flow-layout-controls.png"
+    "images/flow.png"
   ],
   "license": "MIT",
   "devDependencies": {
