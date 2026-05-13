@@ -245,7 +245,8 @@ test('ignores control-flow keywords that only appear inside quoted strings', () 
   const menu = g.analysis.procedures.find((item) => item.id === 'MENU');
 
   assert.ok(menu);
-  assert.equal(menu.exitCount, 1);
+  assert.equal(menu.returnCount, 1);
+  assert.equal(menu.exitCount, 0);
   assert.equal(menu.hasDoForever, false);
   assert.equal(g.analysis.cleanupBypassRisks.length, 0);
   assert.equal(g.analysis.possibleInfiniteLoops.length, 0);

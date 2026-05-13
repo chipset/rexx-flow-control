@@ -242,7 +242,7 @@ function analyzeGraph(nodes, edges, scopeStatements, scopeExitStatements, refere
       const detail = procedureDetailById.get(node.id) || buildProcedureAnalysis(node.id, []);
       const statementCount = detail.statementCount;
       const branchCount = detail.branchCount;
-      const exitCount = detail.exitCount;
+      const { returnCount, exitCount } = detail;
       const fanOut = new Set((outgoing.get(node.id) || []).map((edge) => edge.to)).size;
       const fanIn = new Set((incoming.get(node.id) || []).map((edge) => edge.from)).size;
       return {
@@ -252,6 +252,7 @@ function analyzeGraph(nodes, edges, scopeStatements, scopeExitStatements, refere
         fanOut,
         statementCount,
         branchCount,
+        returnCount,
         exitCount,
         cyclomaticComplexity: 1 + branchCount
       };
@@ -295,7 +296,10 @@ function analyzeGraph(nodes, edges, scopeStatements, scopeExitStatements, refere
 
   const possibleInfiniteLoops = [
     ...recursiveCycles
-      .filter((cycle) => cycle.members.some((member) => (metricById.get(member)?.exitCount || 0) === 0))
+      .filter((cycle) => cycle.members.some((member) => {
+        const m = metricById.get(member);
+        return ((m?.returnCount || 0) + (m?.exitCount || 0)) === 0;
+      }))
       .map((cycle) => ({
         id: cycle.id,
         members: cycle.members,
@@ -441,11 +445,13 @@ function countBranchStatements(statements) {
 }
 
 function countExitStatements(statements) {
-  let count = 0;
+  let returns = 0;
+  let exits = 0;
   for (const item of statements) {
-    count += countMatches(item.analysisUpper, /\b(?:RETURN|EXIT)\b/g);
+    returns += countMatches(item.analysisUpper, /\bRETURN\b/g);
+    exits += countMatches(item.analysisUpper, /\bEXIT\b/g);
   }
-  return count;
+  return { returnCount: returns, exitCount: exits };
 }
 
 function countMatches(text, pattern) {
@@ -642,7 +648,7 @@ function buildProcedureAnalysis(id, statements) {
     line: normalizedStatements[0]?.line || 1,
     statementCount: normalizedStatements.length,
     branchCount: countBranchStatements(normalizedStatements),
-    exitCount: countExitStatements(normalizedStatements),
+    ...countExitStatements(normalizedStatements),
     hasDoForever: normalizedStatements.some((statement) => /\bDO\s+FOREVER\b/.test(statement.analysisUpper)),
     hasLoopEscape: normalizedStatements.some(
       (statement) => statement.isLoopEscape || statement.isTerminal

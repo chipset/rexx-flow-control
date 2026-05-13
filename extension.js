@@ -263,11 +263,6 @@ function activate(context) {
     documentUri = null
   }) =>
     runWithErrorMessage(`Unable to render control flow for "${title}".`, async () => {
-      const currentNonce = ++session.renderNonce;
-      if (currentNonce !== session.renderNonce) {
-        return;
-      }
-
       session.graphData = graph;
       session.documentUri = documentUri;
       session.panel.title = `REXX Control Flow: ${title}`;
@@ -293,11 +288,18 @@ function activate(context) {
     });
 
   const renderSessionForDocument = async (doc, session) => {
+    const currentNonce = ++session.renderNonce;
     const graph = await refreshDiagnosticsForDocument(doc);
+    if (currentNonce !== session.renderNonce) {
+      return null;
+    }
     if (!graph) {
       return null;
     }
     const customCss = await loadCustomCssForDocument(doc);
+    if (currentNonce !== session.renderNonce) {
+      return null;
+    }
     const defaultViewMode = String(
       vscode.workspace.getConfiguration("rexxFlow").get("defaultView", "graph")
     ).trim() === "detailed"
@@ -330,10 +332,17 @@ function activate(context) {
 
     if (message.type === "revealLine") {
       await runWithErrorMessage("Unable to reveal the requested source line.", async () => {
-        const targetUri =
-          message.uri && vscode.Uri?.parse ? vscode.Uri.parse(message.uri) : session.documentUri;
+        const sessionUriStr = session.documentUri ? session.documentUri.toString() : null;
+        const requestedUriStr = message.uri || null;
+        if (requestedUriStr && requestedUriStr !== sessionUriStr) {
+          return;
+        }
+        const targetUri = session.documentUri;
+        if (!targetUri) {
+          return;
+        }
         const docTarget = await vscode.workspace.openTextDocument(targetUri);
-        const line = Math.min(docTarget.lineCount, message.line);
+        const line = Math.min(docTarget.lineCount - 1, message.line);
         const editor = await vscode.window.showTextDocument(docTarget, vscode.ViewColumn.One);
         const position = new vscode.Position(line - 1, 0);
         const range = new vscode.Range(position, position);
