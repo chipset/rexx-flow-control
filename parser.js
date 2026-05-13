@@ -44,17 +44,15 @@ function parseRexxControlFlow(source) {
       .map((node) => node.id)
   );
 
-  for (const block of statementBlocks) {
-    processStatementBlock(block, {
-      nodes,
-      edges,
-      edgeKeys,
-      definedLabels,
-      scopeStatements,
-      scopeExitStatements,
-      referenceSites
-    });
-  }
+  processStatementBlocks(statementBlocks, {
+    nodes,
+    edges,
+    edgeKeys,
+    definedLabels,
+    scopeStatements,
+    scopeExitStatements,
+    referenceSites
+  });
 
   const nodeList = Array.from(nodes.values()).sort((a, b) => {
     if (a.id === "MAIN") {
@@ -66,7 +64,14 @@ function parseRexxControlFlow(source) {
     return a.line - b.line || a.id.localeCompare(b.id);
   });
 
-  const analysis = analyzeGraph(nodeList, edges, scopeStatements, scopeExitStatements, referenceSites);
+  const analysis = analyzeGraph(
+    nodeList,
+    edges,
+    scopeStatements,
+    scopeExitStatements,
+    referenceSites,
+    lines
+  );
   for (const node of nodeList) {
     node.sectionId = analysis.groupMap.section.get(node.id) || "ungrouped";
     node.sectionLabel = analysis.groupLabels.get(node.sectionId) || "Ungrouped";
@@ -77,75 +82,98 @@ function parseRexxControlFlow(source) {
   return { nodes: nodeList, edges, analysis };
 }
 
-function processStatementBlock(
-  block,
+function processStatementBlocks(
+  blocks,
   { nodes, edges, edgeKeys, definedLabels, scopeStatements, scopeExitStatements, referenceSites }
 ) {
-  for (const segment of splitStatements(block.text)) {
-    recordScopeStatement(scopeStatements, block.scope, segment, block.lineNo);
-    maybeRecordExitRisk(scopeExitStatements, block.scope, segment, block.lineNo);
+  let pendingTso = null;
 
-    const externalCalls = extractAddressLinkmvsTargets(segment);
-    const upper = segment.toUpperCase();
-    const searchable = maskQuotedText(upper);
-    const signalPattern = /\bSIGNAL\b\s+ON\b(?:\s+[A-Z0-9_.$!?@#]+)?\s+NAME\b\s+([A-Z0-9_.$!?@#]+)/g;
-    const callPattern = /\bCALL\b\s*(VALUE\b|\(|([A-Z0-9_.$!?@#]+))/g;
-    let match;
-    let signalMatch;
-
-    while ((signalMatch = signalPattern.exec(searchable)) !== null) {
-      const target = normalizeLabel(signalMatch[1]);
-      if (!target || target === "ON" || target === "OFF") {
-        continue;
+  for (const block of blocks) {
+    for (const segment of splitStatements(block.text)) {
+      if (pendingTso && pendingTso.scope === block.scope) {
+        pendingTso.text = `${pendingTso.text} ${collapse(segment)}`.trim();
+        if (hasBalancedDoubleQuotes(pendingTso.text)) {
+          addTsoCommandNode(nodes, edges, edgeKeys, pendingTso.scope, pendingTso.text, pendingTso.lineNo);
+          pendingTso = null;
+        }
+      } else if (isPotentialTsoCommandStart(segment)) {
+        const candidate = collapse(segment);
+        if (hasBalancedDoubleQuotes(candidate)) {
+          addTsoCommandNode(nodes, edges, edgeKeys, block.scope, candidate, block.lineNo);
+        } else {
+          pendingTso = { scope: block.scope, text: candidate, lineNo: block.lineNo };
+        }
       }
-      upsertNode(nodes, target, target, block.lineNo, "reference");
-      markSignalHandler(nodes, target);
-      addEdge(edges, edgeKeys, block.scope, target, "signal-on", block.lineNo);
-      recordReference(referenceSites, target, block.scope, block.lineNo, "signal-on");
+
+      recordScopeStatement(scopeStatements, block.scope, segment, block.lineNo);
+      maybeRecordExitRisk(scopeExitStatements, block.scope, segment, block.lineNo);
+
+      const externalCalls = extractAddressLinkmvsTargets(segment);
+      const upper = segment.toUpperCase();
+      const searchable = maskQuotedText(upper);
+      const signalPattern = /\bSIGNAL\b\s+ON\b(?:\s+[A-Z0-9_.$!?@#]+)?\s+NAME\b\s+([A-Z0-9_.$!?@#]+)/g;
+      const callPattern = /\bCALL\b\s*(VALUE\b|\(|([A-Z0-9_.$!?@#]+))/g;
+      let match;
+      let signalMatch;
+
+      while ((signalMatch = signalPattern.exec(searchable)) !== null) {
+        const target = normalizeLabel(signalMatch[1]);
+        if (!target || target === "ON" || target === "OFF") {
+          continue;
+        }
+        upsertNode(nodes, target, target, block.lineNo, "reference");
+        markSignalHandler(nodes, target);
+        addEdge(edges, edgeKeys, block.scope, target, "signal-on", block.lineNo);
+        recordReference(referenceSites, target, block.scope, block.lineNo, "signal-on");
+      }
+
+      for (const targetText of externalCalls) {
+        const normalizedTarget = normalizeExternalTarget(targetText);
+        if (!normalizedTarget) {
+          continue;
+        }
+        const nodeId = `LINKMVS:${normalizedTarget}`;
+        upsertNode(nodes, nodeId, targetText, block.lineNo, "external-program");
+        addEdge(edges, edgeKeys, block.scope, nodeId, "external-call", block.lineNo);
+      }
+
+      while ((match = callPattern.exec(searchable)) !== null) {
+        if (match[1] === "VALUE" || match[1] === "(") {
+          upsertNode(nodes, "DYNAMIC_CALL", "DYNAMIC_CALL", block.lineNo, "dynamic");
+          addEdge(edges, edgeKeys, block.scope, "DYNAMIC_CALL", "calls-dynamic", block.lineNo);
+          continue;
+        }
+
+        const target = normalizeLabel(match[2]);
+        if (target === "ON" || target === "OFF") {
+          continue;
+        }
+
+        upsertNode(nodes, target, target, block.lineNo, "reference");
+        addEdge(edges, edgeKeys, block.scope, target, "calls", block.lineNo);
+        recordReference(referenceSites, target, block.scope, block.lineNo, "calls");
+      }
+
+      const directInvokePattern = /\b([A-Z0-9_.$!?@#]+)\s*\(/g;
+      let direct;
+      while ((direct = directInvokePattern.exec(searchable)) !== null) {
+        const target = normalizeLabel(direct[1]);
+        if (!definedLabels || !definedLabels.has(target) || target === "MAIN") {
+          continue;
+        }
+        upsertNode(nodes, target, target, block.lineNo, "reference");
+        addEdge(edges, edgeKeys, block.scope, target, "calls", block.lineNo);
+        recordReference(referenceSites, target, block.scope, block.lineNo, "calls");
+      }
     }
+  }
 
-    for (const targetText of externalCalls) {
-      const normalizedTarget = normalizeExternalTarget(targetText);
-      if (!normalizedTarget) {
-        continue;
-      }
-      const nodeId = `LINKMVS:${normalizedTarget}`;
-      upsertNode(nodes, nodeId, targetText, block.lineNo, "external-program");
-      addEdge(edges, edgeKeys, block.scope, nodeId, "external-call", block.lineNo);
-    }
-
-    while ((match = callPattern.exec(searchable)) !== null) {
-      if (match[1] === "VALUE" || match[1] === "(") {
-        upsertNode(nodes, "DYNAMIC_CALL", "DYNAMIC_CALL", block.lineNo, "dynamic");
-        addEdge(edges, edgeKeys, block.scope, "DYNAMIC_CALL", "calls-dynamic", block.lineNo);
-        continue;
-      }
-
-      const target = normalizeLabel(match[2]);
-      if (target === "ON" || target === "OFF") {
-        continue;
-      }
-
-      upsertNode(nodes, target, target, block.lineNo, "reference");
-      addEdge(edges, edgeKeys, block.scope, target, "calls", block.lineNo);
-      recordReference(referenceSites, target, block.scope, block.lineNo, "calls");
-    }
-
-    const directInvokePattern = /\b([A-Z0-9_.$!?@#]+)\s*\(/g;
-    let direct;
-    while ((direct = directInvokePattern.exec(searchable)) !== null) {
-      const target = normalizeLabel(direct[1]);
-      if (!definedLabels || !definedLabels.has(target) || target === "MAIN") {
-        continue;
-      }
-      upsertNode(nodes, target, target, block.lineNo, "reference");
-      addEdge(edges, edgeKeys, block.scope, target, "calls", block.lineNo);
-      recordReference(referenceSites, target, block.scope, block.lineNo, "calls");
-    }
+  if (pendingTso) {
+    addTsoCommandNode(nodes, edges, edgeKeys, pendingTso.scope, pendingTso.text, pendingTso.lineNo);
   }
 }
 
-function analyzeGraph(nodes, edges, scopeStatements, scopeExitStatements, referenceSites) {
+function analyzeGraph(nodes, edges, scopeStatements, scopeExitStatements, referenceSites, sourceLines = []) {
   const definedProcedureIds = new Set(
     nodes.filter((node) => node.kind === "function" || node.kind === "entry").map((node) => node.id)
   );
@@ -291,6 +319,7 @@ function analyzeGraph(nodes, edges, scopeStatements, scopeExitStatements, refere
       afterLine: item.afterLine
     }))
   );
+  const lineLengthWarnings = collectLineLengthWarnings(sourceLines, 80);
 
   const sectionInfo = buildSectionGroups(procedureNodes);
   const groups = {
@@ -322,6 +351,7 @@ function analyzeGraph(nodes, edges, scopeStatements, scopeExitStatements, refere
     recursiveCycles,
     possibleInfiniteLoops,
     deadCodeStatements,
+    lineLengthWarnings,
     cleanupBypassRisks,
     metrics,
     procedures: procedureDetails,
@@ -421,6 +451,25 @@ function countExitStatements(statements) {
 function countMatches(text, pattern) {
   const matches = text.match(pattern);
   return matches ? matches.length : 0;
+}
+
+function collectLineLengthWarnings(lines, maxColumns) {
+  const warnings = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = String(lines[i] || "");
+    if (!line.trim()) {
+      continue;
+    }
+    if (line.length > maxColumns) {
+      warnings.push({
+        line: i + 1,
+        length: line.length,
+        maxColumns,
+        preview: collapse(line).slice(0, 96)
+      });
+    }
+  }
+  return warnings;
 }
 
 function buildStatementRecord(statement, line) {
@@ -742,6 +791,39 @@ function extractAddressLinkmvsTargets(segment) {
     }
   }
   return targets;
+}
+
+function isPotentialTsoCommandStart(segment) {
+  return /^\s*"/.test(String(segment || ""));
+}
+
+function hasBalancedDoubleQuotes(text) {
+  let count = 0;
+  for (const ch of String(text || "")) {
+    if (ch === '"') {
+      count += 1;
+    }
+  }
+  return count >= 2 && count % 2 === 0;
+}
+
+function addTsoCommandNode(nodes, edges, edgeKeys, scope, text, lineNo) {
+  const label = summarizeTsoCommand(text);
+  if (!label) {
+    return;
+  }
+  const normalizedTarget = normalizeExternalTarget(label);
+  const nodeId = `TSO:${normalizedTarget}`;
+  upsertNode(nodes, nodeId, label, lineNo, "tso-command");
+  addEdge(edges, edgeKeys, scope, nodeId, "tso-call", lineNo);
+}
+
+function summarizeTsoCommand(text) {
+  const normalized = collapse(String(text || ""));
+  if (!normalized) {
+    return "";
+  }
+  return normalized.length > 72 ? `${normalized.slice(0, 69)}...` : normalized;
 }
 
 function normalizeExternalTarget(value) {

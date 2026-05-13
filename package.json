@@ -25,9 +25,12 @@
     "onLanguage:rexx",
     "onLanguage:REXX",
     "onCommand:rexxFlow.showControlGraph",
+    "onCommand:rexxFlow.showWorkspaceControlGraph",
     "onCommand:rexxFlow.exportGraphJson",
     "onCommand:rexxFlow.exportDot",
-    "onCommand:rexxFlow.exportExcalidraw"
+    "onCommand:rexxFlow.exportExcalidraw",
+    "onCommand:rexxFlow.exportSvg",
+    "onCommand:rexxFlow.exportPng"
   ],
   "icon": "images/icon.png",
   "main": "./extension.js",
@@ -37,6 +40,11 @@
         "command": "rexxFlow.showControlGraph",
         "category": "REXX Control Flow",
         "title": "Generate REXX Control Flow"
+      },
+      {
+        "command": "rexxFlow.showWorkspaceControlGraph",
+        "category": "REXX Control Flow",
+        "title": "Generate Workspace REXX Control Flow"
       },
       {
         "command": "rexxFlow.exportGraphJson",
@@ -52,6 +60,16 @@
         "command": "rexxFlow.exportExcalidraw",
         "category": "REXX Control Flow",
         "title": "Export REXX Control Flow to Excalidraw"
+      },
+      {
+        "command": "rexxFlow.exportSvg",
+        "category": "REXX Control Flow",
+        "title": "Export REXX Control Flow to SVG"
+      },
+      {
+        "command": "rexxFlow.exportPng",
+        "category": "REXX Control Flow",
+        "title": "Export REXX Control Flow to PNG"
       }
     ],
     "menus": {
