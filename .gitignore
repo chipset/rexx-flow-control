@@ -20,3 +20,4 @@ coverage/
 # Local agent/runtime state
 .codex/
 .omx/
+AGENTS.md
