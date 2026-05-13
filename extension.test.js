@@ -173,6 +173,8 @@ test('renders graph mode fit logic with movable nodes, pointer interactions, and
   assert.match(html, /window\.addEventListener\('mousemove'/);
   assert.match(html, /window\.addEventListener\('keydown'/);
   assert.match(html, /min-width: 0;/);
+  assert.match(html, /oninput: \(event\) => \{ state\.search = event\.target\.value; renderGraphOnly\(\); \}/);
+  assert.doesNotMatch(html, /oninput: \(event\) => \{ state\.search = event\.target\.value; render\(\); \}/);
 });
 
 test('adapts graph data into the new module sidebar and inspector view', () => {
