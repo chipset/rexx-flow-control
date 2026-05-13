@@ -148,8 +148,18 @@ test('renders graph mode fit logic with movable nodes, pointer interactions, and
   assert.match(html, /Export Excalidraw/);
   assert.match(html, /Export SVG/);
   assert.match(html, /Export PNG/);
+  assert.match(html, /Allow Node Movement/);
+  assert.match(html, /Disable Node Movement/);
+  assert.match(html, /Reset View/);
   assert.match(html, /vscode\.postMessage\(\{ type: 'exportGraphJson' \}\)/);
   assert.match(html, /vscode\.postMessage\(\{ type: 'exportSvg', svg: buildExportSvgString\(\) \}\)/);
+  assert.match(html, /vscode\.postMessage\(\{ type: 'persistUiState', state: statePayload \}\)/);
+  assert.match(html, /function finishNodeDrag\(\) \{/);
+  assert.match(html, /if \(\(event\.buttons & 1\) !== 1\) \{/);
+  assert.match(html, /window\.addEventListener\('blur'/);
+  assert.match(html, /state\.nodePositions\.set\(nodeDrag\.id, next\)/);
+  assert.match(html, /layoutData = applySavedNodePositions\(computeLayout\(\)\)/);
+  assert.match(html, /function resetGraphView\(\) \{/);
   assert.match(html, /function exportPng\(\) \{/);
   assert.match(html, /msg\.type === 'triggerExportSvg'/);
   assert.match(html, /msg\.type === 'triggerExportPng'/);
@@ -159,6 +169,10 @@ test('renders graph mode fit logic with movable nodes, pointer interactions, and
   assert.match(html, /width: NODE_W \+ 'px'/);
   assert.match(html, /state\.layout === 'layered'/);
   assert.match(html, /state\.layout === 'radial'/);
+  assert.match(html, /const densityScale = 1;/);
+  assert.doesNotMatch(html, /compact', 'regular', 'comfy/);
+  assert.doesNotMatch(html, /density: 'regular'/);
+  assert.doesNotMatch(html, /state\.density/);
   assert.match(html, /function edgePath\(from, to\) \{/);
   assert.match(html, /const horizontal = Math\.abs\(dx\) >= Math\.abs\(dy\);/);
   assert.match(html, /Math\.hypot\(dx, dy\) \* \.34/);
@@ -170,6 +184,17 @@ test('renders graph mode fit logic with movable nodes, pointer interactions, and
   assert.doesNotMatch(html, /edgesSvg\.style\.transform = t;/);
   assert.match(html, /function renderMinimap\(\) \{/);
   assert.match(html, /function renderInspector\(root\) \{/);
+  assert.match(html, /state\.moduleOpen\.add\(fn\.module\);/);
+  assert.match(html, /state\.visibleModules\.add\(fn\.module\);/);
+  assert.match(html, /data-fn-row-id/);
+  assert.match(html, /scrollIntoView\(\{ block: 'nearest' \}\)/);
+  assert.match(html, /\.node\.uncalled/);
+  assert.match(html, /const uncalled = !\['MAIN', 'WORKSPACE'\]\.includes\(fn\.id\) && \(REX\.IN_DEGREE\[fn\.id\] \|\| 0\) === 0;/);
+  assert.match(html, /title: 'Not called by another node', text: '!'/);
+  assert.match(html, /const hasUncalled = REX\.FUNCTIONS\.some\(\(fn\) => !\['MAIN', 'WORKSPACE'\]\.includes\(fn\.id\) && \(REX\.IN_DEGREE\[fn\.id\] \|\| 0\) === 0\);/);
+  assert.match(html, /if \(hasUncalled\) \{/);
+  assert.match(html, /text: 'Uncalled function'/);
+  assert.match(html, /legend-uncalled/);
   assert.match(html, /window\.addEventListener\('mousemove'/);
   assert.match(html, /window\.addEventListener\('keydown'/);
   assert.match(html, /min-width: 0;/);
@@ -199,4 +224,24 @@ test('adapts graph data into the new module sidebar and inspector view', () => {
   assert.match(html, /selectedId: REX\.FN_BY_ID\.MAIN \? 'MAIN'/);
   assert.match(html, /relList\('Called by', callers\)/);
   assert.match(html, /relList\('Calls', fn\.calls\)/);
+});
+
+test('hydrates saved node positions in the new graph renderer', () => {
+  const html = renderGraphHtml(
+    {
+      nodes: [{ id: 'MAIN', label: 'MAIN', line: 1, kind: 'entry', flags: [], fileLabel: 'demo.rex' }],
+      edges: [],
+      analysis: { metrics: [] }
+    },
+    'demo.rex',
+    '',
+    'graph',
+    'nonce123',
+    {
+      nodePositions: { MAIN: { x: 432, y: 210 } }
+    }
+  );
+
+  assert.match(html, /const persisted = \{"nodePositions":\{"MAIN":\{"x":432,"y":210\}\}\};/);
+  assert.match(html, /const nodePositions = new Map\(Object\.entries\(persisted\.nodePositions \|\| \{\}\)/);
 });
