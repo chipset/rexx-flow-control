@@ -87,10 +87,12 @@
   },
   "scripts": {
     "lint": "echo 'No lint configured'",
-    "test": "node --test"
+    "test": "node --test",
+    "package:vsix": "npx --yes @vscode/vsce package"
   },
   "files": [
     "extension.js",
+    "lib",
     "parser.js",
     "README.md",
     "CHANGELOG.md",

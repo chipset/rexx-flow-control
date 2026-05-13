@@ -3,6 +3,16 @@ const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const { parseRexxControlFlow, toDot, toExcalidraw } = require("./parser");
+const { renderGraphHtml: renderNewGraphHtml } = require("./lib/webview-render");
+const {
+  buildWebviewCsp,
+  createGraphWebviewOptions,
+  normalizeGraphWebviewMessage
+} = require("./lib/shared");
+const {
+  sanitizeCss: sanitizeWebviewCss,
+  nodeCategoryForKind: nodeCategoryForWebviewKind
+} = require("./lib/webview-support");
 
 const SUPPORTED_LANGS = new Set(["rexx", "REXX"]);
 
@@ -13,6 +23,15 @@ function activate(context) {
   let cssWarningKey = null;
   let renderTimer = null;
   let renderNonce = 0;
+  const graphSessions = new Map();
+
+  const uiStateKey = (uri) => `rexxFlow.uiState:${uri.toString()}`;
+
+  const setActiveSession = (session) => {
+    graphPanel = session.panel;
+    graphDocumentUri = session.uri;
+    graphData = session.graph;
+  };
 
   const loadCustomCssForDocument = async (doc) => {
     const configuredPath = String(
@@ -20,6 +39,17 @@ function activate(context) {
     ).trim();
     if (!configuredPath) {
       cssWarningKey = null;
+      return "";
+    }
+
+    if (!vscode.workspace.isTrusted && !path.isAbsolute(configuredPath) && !configuredPath.startsWith("~")) {
+      const key = `untrusted:${configuredPath}`;
+      if (cssWarningKey !== key) {
+        cssWarningKey = key;
+        vscode.window.showWarningMessage(
+          "REXX Control Flow: custom CSS is disabled for untrusted workspaces."
+        );
+      }
       return "";
     }
 
@@ -63,32 +93,42 @@ function activate(context) {
       return;
     }
     graphData = graph;
-    if (!graphPanel) {
-      graphPanel = vscode.window.createWebviewPanel(
+    const sessionKey = doc.uri.toString();
+    let session = graphSessions.get(sessionKey);
+    if (!session) {
+      const panel = vscode.window.createWebviewPanel(
         "rexxControlFlow",
         `REXX Control Flow: ${path.basename(doc.fileName)}`,
         vscode.ViewColumn.Beside,
         { enableScripts: true }
       );
+      session = { panel, uri: doc.uri, graph, renderTimer: null };
+      graphSessions.set(sessionKey, session);
+      setActiveSession(session);
 
-      graphPanel.onDidDispose(() => {
-        if (renderTimer) {
-          clearTimeout(renderTimer);
-          renderTimer = null;
+      panel.onDidDispose(() => {
+        if (session.renderTimer) {
+          clearTimeout(session.renderTimer);
+          session.renderTimer = null;
         }
-        graphPanel = null;
-        graphDocumentUri = null;
-        graphData = null;
+        graphSessions.delete(sessionKey);
+        if (graphDocumentUri && graphDocumentUri.toString() === sessionKey) {
+          graphPanel = null;
+          graphDocumentUri = null;
+          graphData = null;
+        }
       });
 
-      graphPanel.webview.onDidReceiveMessage(async (msg) => {
-        if (!msg || !graphDocumentUri) {
+      panel.webview.onDidReceiveMessage(async (rawMsg) => {
+        const msg = normalizeGraphWebviewMessage(rawMsg);
+        if (!msg) {
           return;
         }
+        const sessionDocUri = session.uri;
 
         if (msg.type === "revealLine") {
           const line = Math.max(1, Number(msg.line) || 1);
-          const targetUri = graphDocumentUri;
+          const targetUri = sessionDocUri;
           const docTarget = await vscode.workspace.openTextDocument(targetUri);
           const editor = await vscode.window.showTextDocument(docTarget, vscode.ViewColumn.One);
           const position = new vscode.Position(line - 1, 0);
@@ -98,7 +138,17 @@ function activate(context) {
           return;
         }
 
-        const docTarget = await vscode.workspace.openTextDocument(graphDocumentUri);
+        if (msg.type === "persistUiState") {
+          await context.workspaceState.update(uiStateKey(sessionDocUri), msg.state);
+          return;
+        }
+
+        if (msg.type === "exportPngError") {
+          await vscode.window.showErrorMessage(`REXX Control Flow: ${msg.error}`);
+          return;
+        }
+
+        const docTarget = await vscode.workspace.openTextDocument(sessionDocUri);
         if (!isSupported(docTarget)) {
           return;
         }
@@ -128,13 +178,22 @@ function activate(context) {
         }
       });
     }
-    if (graphPanel.visible === false) {
-      graphPanel.reveal(vscode.ViewColumn.Beside, false);
+    session.graph = graph;
+    setActiveSession(session);
+    if (session.panel.visible === false) {
+      session.panel.reveal(vscode.ViewColumn.Beside, false);
     }
 
     graphDocumentUri = doc.uri;
-    graphPanel.title = `REXX Control Flow: ${path.basename(doc.fileName)}`;
-    graphPanel.webview.html = renderGraphHtml(graph, doc.fileName, customCss, defaultViewMode);
+    session.panel.title = `REXX Control Flow: ${path.basename(doc.fileName)}`;
+    session.panel.webview.html = renderNewGraphHtml(
+      graph,
+      doc.fileName,
+      customCss,
+      defaultViewMode,
+      undefined,
+      context.workspaceState.get(uiStateKey(doc.uri), {})
+    );
 
     const activeEditor = vscode.window.activeTextEditor;
     if (activeEditor && activeEditor.document.uri.toString() === doc.uri.toString()) {
@@ -213,7 +272,7 @@ function activate(context) {
   };
 
   const exportJsonFromDocument = async (doc) => {
-    const graph = parseRexxControlFlow(doc.getText());
+    const graph = graphSessions.get(doc.uri.toString())?.graph || parseRexxControlFlow(doc.getText());
     const uri = await writeExportFile(
       doc,
       "json",
@@ -228,7 +287,7 @@ function activate(context) {
   };
 
   const exportDotFromDocument = async (doc) => {
-    const graph = parseRexxControlFlow(doc.getText());
+    const graph = graphSessions.get(doc.uri.toString())?.graph || parseRexxControlFlow(doc.getText());
     const uri = await writeExportFile(doc, "dot", toDot(graph), { "Graphviz DOT": ["dot"] });
     if (!uri) {
       return;
@@ -238,7 +297,7 @@ function activate(context) {
   };
 
   const exportExcalidrawFromDocument = async (doc) => {
-    const graph = parseRexxControlFlow(doc.getText());
+    const graph = graphSessions.get(doc.uri.toString())?.graph || parseRexxControlFlow(doc.getText());
     const uri = await writeExportFile(
       doc,
       "excalidraw",
@@ -271,7 +330,60 @@ function activate(context) {
       return;
     }
 
-    await renderForDocument(editor.document);
+    try {
+      await renderForDocument(editor.document);
+    } catch (err) {
+      const failedPanel = vscode.window.createWebviewPanel(
+        "rexxControlFlow",
+        `REXX Control Flow: ${path.basename(editor.document.fileName)}`,
+        vscode.ViewColumn.Beside,
+        { enableScripts: true }
+      );
+      failedPanel.dispose();
+      await vscode.window.showErrorMessage(
+        `REXX Control Flow: Unable to render control flow. ${
+          err && err.message ? err.message : "Unknown error."
+        }`
+      );
+    }
+  });
+
+  const showWorkspace = vscode.commands.registerCommand("rexxFlow.showWorkspaceControlGraph", async () => {
+    try {
+      const docs = (vscode.workspace.textDocuments || []).filter(isSupported);
+      const graphs = docs.map((doc) => ({ doc, graph: parseRexxControlFlow(doc.getText()) }));
+      const combined = {
+        nodes: graphs.flatMap(({ doc, graph }) =>
+          graph.nodes.map((node) => ({
+            ...node,
+            id: `${path.basename(doc.fileName)}:${node.id}`,
+            label: node.label || node.id,
+            fileLabel: path.basename(doc.fileName),
+            fileUri: doc.uri.toString()
+          }))
+        ),
+        edges: graphs.flatMap(({ doc, graph }) =>
+          graph.edges.map((edge) => ({
+            ...edge,
+            from: `${path.basename(doc.fileName)}:${edge.from}`,
+            to: `${path.basename(doc.fileName)}:${edge.to}`
+          }))
+        ),
+        analysis: { metrics: [], groups: {} }
+      };
+      const panel = vscode.window.createWebviewPanel(
+        "rexxControlFlowWorkspace",
+        "REXX Control Flow: Workspace",
+        vscode.ViewColumn.Beside,
+        { enableScripts: true }
+      );
+      panel.title = "REXX Control Flow: Workspace";
+      panel.webview.html = renderNewGraphHtml(combined, "Workspace", "", "graph");
+    } catch (err) {
+      await vscode.window.showErrorMessage(
+        `REXX Control Flow: ${err && err.message ? err.message : "Unable to render workspace graph."}`
+      );
+    }
   });
 
   const exportJson = vscode.commands.registerCommand("rexxFlow.exportGraphJson", async () => {
@@ -302,6 +414,26 @@ function activate(context) {
     }
 
     await exportExcalidrawFromDocument(editor.document);
+  });
+
+  const exportSvg = vscode.commands.registerCommand("rexxFlow.exportSvg", async () => {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor || !isSupported(editor.document)) {
+      vscode.window.showWarningMessage("Open a REXX file to export control flow.");
+      return;
+    }
+    await renderForDocument(editor.document);
+    graphSessions.get(editor.document.uri.toString())?.panel.webview.postMessage({ type: "triggerExportSvg" });
+  });
+
+  const exportPng = vscode.commands.registerCommand("rexxFlow.exportPng", async () => {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor || !isSupported(editor.document)) {
+      vscode.window.showWarningMessage("Open a REXX file to export control flow.");
+      return;
+    }
+    await renderForDocument(editor.document);
+    graphSessions.get(editor.document.uri.toString())?.panel.webview.postMessage({ type: "triggerExportPng" });
   });
 
   const onDocumentChange = vscode.workspace.onDidChangeTextDocument((event) => {
@@ -349,9 +481,12 @@ function activate(context) {
 
   context.subscriptions.push(
     show,
+    showWorkspace,
     exportJson,
     exportDot,
     exportExcalidraw,
+    exportSvg,
+    exportPng,
     onDocumentChange,
     onDocumentSave,
     onSelectionChange,
@@ -1963,5 +2098,11 @@ function deactivate() {}
 
 module.exports = {
   activate,
-  deactivate
+  deactivate,
+  buildWebviewCsp,
+  createGraphWebviewOptions,
+  nodeCategoryForKind: nodeCategoryForWebviewKind,
+  normalizeGraphWebviewMessage,
+  renderGraphHtml: renderNewGraphHtml,
+  sanitizeCss: sanitizeWebviewCss
 };
