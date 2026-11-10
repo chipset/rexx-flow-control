@@ -60,6 +60,8 @@ function createVscodeHarness({ document, documents, config = {}, isTrusted = tru
   const commands = new Map();
   const warnings = [];
   const errors = [];
+  const infos = [];
+  const clipboardWrites = [];
   const postedMessages = [];
   const panels = [];
   const shownDocuments = [];
@@ -283,6 +285,13 @@ function createVscodeHarness({ document, documents, config = {}, isTrusted = tru
         return makeDisposable();
       }
     },
+    env: {
+      clipboard: {
+        async writeText(value) {
+          clipboardWrites.push(value);
+        }
+      }
+    },
     window: {
       get activeTextEditor() {
         return activeEditor;
@@ -296,6 +305,9 @@ function createVscodeHarness({ document, documents, config = {}, isTrusted = tru
       },
       async showErrorMessage(message) {
         errors.push(message);
+      },
+      async showInformationMessage(message) {
+        infos.push(message);
       },
       async showSaveDialog() {
         return saveUri || null;
@@ -332,6 +344,8 @@ function createVscodeHarness({ document, documents, config = {}, isTrusted = tru
       commands,
       warnings,
       errors,
+      infos,
+      clipboardWrites,
       panels,
       postedMessages,
       shownDocuments,
@@ -391,6 +405,7 @@ test("activate registers commands and reuses the rendered graph cache during JSO
 
   assert.ok(state.commands.has("rexxFlow.showControlGraph"));
   assert.ok(state.commands.has("rexxFlow.showWorkspaceControlGraph"));
+  assert.ok(state.commands.has("rexxFlow.openTaskDashboard"));
   assert.ok(state.commands.has("rexxFlow.exportGraphJson"));
   assert.ok(state.commands.has("rexxFlow.exportSvg"));
   assert.ok(state.commands.has("rexxFlow.exportPng"));
@@ -403,6 +418,144 @@ test("activate registers commands and reuses the rendered graph cache during JSO
   assert.match(exported, /"MAIN"/);
 });
 
+test("revealing a selected node lands on its exact source line", async () => {
+  const sourceDoc = createDocument({
+    fileName: path.join(os.tmpdir(), "rexx-flow-navigation.rex"),
+    text: "say 'start'\nfirst:\nsay 'middle'\nsecond:"
+  });
+  const parserMock = {
+    parseRexxControlFlow: createGraphFixture,
+    toDot: () => "",
+    toExcalidraw: () => "{}"
+  };
+  const { vscodeMock, state } = createVscodeHarness({ document: sourceDoc });
+  const extension = loadExtensionWithMocks({ vscodeMock, parserMock });
+
+  extension.activate({ subscriptions: [], workspaceState: state.workspaceState });
+  await state.commands.get("rexxFlow.showControlGraph")();
+  await state.panels[0].receiveMessage({ type: "revealLine", line: 4, uri: "" });
+
+  assert.deepEqual(state.shownDocuments, [sourceDoc.fileName]);
+  assert.equal(state.activeEditor.selection.active.line, 3);
+  assert.equal(state.activeEditor.lastRevealRange.start.line, 3);
+});
+
+test("task dashboard command opens a persisted dashboard panel", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "rexx-flow-dashboard-"));
+  const sourceDoc = createDocument({
+    fileName: path.join(tempDir, "sample.rex"),
+    text: "say 'hi'"
+  });
+  const parserMock = {
+    parseRexxControlFlow() {
+      return createGraphFixture();
+    },
+    toDot() {
+      return "";
+    },
+    toExcalidraw() {
+      return "{}";
+    }
+  };
+  const { vscodeMock, state } = createVscodeHarness({ document: sourceDoc });
+  await state.workspaceState.update("rexxFlow.taskDashboard", {
+    tasks: [
+      {
+        id: "task-1",
+        title: "Backfill request composer tests",
+        notes: "Persist draft state",
+        status: "todo",
+        priority: "high",
+        tags: ["tests"]
+      }
+    ],
+    selectedTaskIds: ["task-1"],
+    instruction: "Implement the selected task.",
+    query: "",
+    statusFilter: "all"
+  });
+  const extension = loadExtensionWithMocks({ vscodeMock, parserMock });
+
+  extension.activate({ subscriptions: [], workspaceState: state.workspaceState });
+  await state.commands.get("rexxFlow.openTaskDashboard")();
+
+  assert.equal(state.panels.length, 1);
+  assert.match(state.panels[0].title, /Task Dashboard/);
+  assert.match(state.panels[0].webview.html, /Backfill request composer tests/);
+  assert.match(state.panels[0].webview.html, /Implement the selected task\./);
+});
+
+test("task dashboard messages persist state and copy request text", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "rexx-flow-dashboard-msg-"));
+  const sourceDoc = createDocument({
+    fileName: path.join(tempDir, "sample.rex"),
+    text: "say 'hi'"
+  });
+  const parserMock = {
+    parseRexxControlFlow() {
+      return createGraphFixture();
+    },
+    toDot() {
+      return "";
+    },
+    toExcalidraw() {
+      return "{}";
+    }
+  };
+  const { vscodeMock, state } = createVscodeHarness({ document: sourceDoc });
+  const extension = loadExtensionWithMocks({ vscodeMock, parserMock });
+
+  extension.activate({ subscriptions: [], workspaceState: state.workspaceState });
+  await state.commands.get("rexxFlow.openTaskDashboard")();
+
+  await state.panels[0].receiveMessage({
+    type: "persistTaskDashboardState",
+    state: {
+      tasks: [
+        {
+          id: "task-1",
+          title: "Ship dashboard",
+          notes: "Need copy flow",
+          status: "in-progress",
+          priority: "high",
+          tags: ["ui", "host"]
+        }
+      ],
+      selectedTaskIds: ["task-1"],
+      instruction: "Finish the selected work.",
+      query: "ship",
+      statusFilter: "in-progress"
+    }
+  });
+
+  assert.deepEqual(state.workspaceState.get("rexxFlow.taskDashboard"), {
+    tasks: [
+      {
+        id: "task-1",
+        title: "Ship dashboard",
+        notes: "Need copy flow",
+        status: "in-progress",
+        priority: "high",
+        tags: ["ui", "host"],
+        createdAt: "",
+        updatedAt: ""
+      }
+    ],
+    selectedTaskIds: ["task-1"],
+    instruction: "Finish the selected work.",
+    query: "ship",
+    statusFilter: "in-progress"
+  });
+
+  await state.panels[0].receiveMessage({
+    type: "copyTaskRequest",
+    text: "Use my selected tasks to finish the dashboard."
+  });
+
+  assert.deepEqual(state.clipboardWrites, ["Use my selected tasks to finish the dashboard."]);
+  assert.match(state.infos[0], /Task request copied to clipboard/);
+});
+
 test("workspace graph command opens a workspace session panel", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "rexx-flow-workspace-"));
   const firstDoc = createDocument({
@@ -411,7 +564,7 @@ test("workspace graph command opens a workspace session panel", async () => {
   });
   const secondDoc = createDocument({
     fileName: path.join(tempDir, "beta.rex"),
-    text: "say 'beta'"
+    text: "say 'beta'\nnext:"
   });
   let parseCalls = 0;
   const parserMock = {
@@ -438,6 +591,14 @@ test("workspace graph command opens a workspace session panel", async () => {
   assert.equal(state.panels.length, 1);
   assert.match(state.panels[0].title, /Workspace/);
   assert.equal(parseCalls, 2);
+
+  await state.panels[0].receiveMessage({
+    type: "revealLine",
+    line: 2,
+    uri: secondDoc.uri.toString()
+  });
+  assert.equal(state.activeEditor.document.fileName, secondDoc.fileName);
+  assert.equal(state.activeEditor.selection.active.line, 1);
 });
 
 test("render failures are surfaced as user-facing errors", async () => {

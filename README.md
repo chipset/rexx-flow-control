@@ -8,6 +8,7 @@ REXX Control Flow is a VS Code extension that visualizes procedure-level REXX ca
 
 - Generate an interactive call graph from the active REXX editor.
 - Generate a workspace-wide graph across supported REXX files.
+- Open a task dashboard to capture work items and draft Codex-ready requests from selected tasks.
 - Auto-refresh open document graphs when source content changes or is saved.
 - Refresh workspace graphs when supported documents are opened, closed, changed, or saved.
 - Surface diagnostics in both the graph and VS Code Problems panel.
@@ -41,6 +42,7 @@ REXX Control Flow is a VS Code extension that visualizes procedure-level REXX ca
 
 From the command palette, you can also run:
 
+- **REXX Control Flow: Open Task Dashboard**
 - **REXX Control Flow: Generate REXX Control Flow**
 - **REXX Control Flow: Generate Workspace REXX Control Flow**
 - **REXX Control Flow: Export REXX Control Flow to JSON**
@@ -51,10 +53,19 @@ From the command palette, you can also run:
 
 The editor context menu focuses on graph generation. Export actions are available from the command palette and from the graph view right-click menu.
 
+## Task Dashboard
+
+- Open **REXX Control Flow: Open Task Dashboard** from the command palette.
+- Add tasks with status, priority, tags, and notes.
+- Select the tasks you want to act on, then write a short instruction for Codex.
+- Use **Copy request** to copy a prompt built from the selected tasks so you can paste it into your Codex chat.
+- Dashboard state persists in the current workspace.
+
 ## Graph View
 
 - The graph opens with module navigation on the left, the graph canvas in the center, and an inspector on the right.
 - Select a function from the left module list, the main graph, or the right inspector to update all three areas together.
+- Selecting a function also opens its source file at the function's line.
 - Use the layout switcher to choose `tree`, `layered`, or `radial`.
 - The graph always uses regular node spacing; compact/comfy density controls are intentionally not exposed.
 - Scroll or trackpad zooms the graph canvas.
@@ -125,6 +136,17 @@ All exports use a Save dialog with defaults from the active REXX file:
 - `npm run package:vsix`: package the extension as a `.vsix` file.
 
 GitHub Actions runs `npm run verify` and the real VS Code harness under `xvfb` on Ubuntu.
+
+## Publishing
+
+Create the `TMcQ` publisher in the VS Code Marketplace and the `TMcQ` namespace in Open VSX before the first upload. Complete the Open VSX publisher agreement. Set `VSCE_PAT` for the Marketplace and `OVSX_PAT` for Open VSX in your environment; the script never takes tokens as command arguments. `VSCE_AZURE_CREDENTIAL=1` can replace `VSCE_PAT` when publishing with Microsoft Entra ID.
+
+- `npm run release -- --current` verifies, packages, and publishes the current `0.2.1` version to both registries.
+- `npm run release` increments the patch version, then verifies, packages, and publishes it.
+- `npm run release -- 0.3.0` sets an explicit version before packaging and publishing.
+- `npm run release -- --current --only open-vsx` retries only Open VSX after a partial release. Use `--only marketplace` to retry only the Marketplace.
+
+The release script updates `package.json` and `package-lock.json` without creating a commit or tag. It builds one VSIX and uploads that same file to both registries. If a publish step fails, the version and VSIX remain in place for a `--current` retry.
 
 ## Notes
 

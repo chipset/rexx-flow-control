@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.1
+
+- Added a workspace task dashboard for drafting requests from selected tasks.
+- Fixed graph node selection so it reveals the matching function in the source editor.
+
 ## 0.2.0
 
 - Aligned packaged version metadata with the current extension release.

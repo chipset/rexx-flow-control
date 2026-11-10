@@ -2,7 +2,7 @@
   "name": "rexx-control-flow",
   "displayName": "REXX Control Flow",
   "description": "Visualize REXX procedure graphs with an interactive new view, diagnostics, workspace graphs, and exports.",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "publisher": "TMcQ",
   "repository": {
     "type": "git",
@@ -26,6 +26,7 @@
     "onLanguage:REXX",
     "onCommand:rexxFlow.showControlGraph",
     "onCommand:rexxFlow.showWorkspaceControlGraph",
+    "onCommand:rexxFlow.openTaskDashboard",
     "onCommand:rexxFlow.exportGraphJson",
     "onCommand:rexxFlow.exportDot",
     "onCommand:rexxFlow.exportExcalidraw",
@@ -36,6 +37,11 @@
   "main": "./extension.js",
   "contributes": {
     "commands": [
+      {
+        "command": "rexxFlow.openTaskDashboard",
+        "category": "REXX Control Flow",
+        "title": "Open Task Dashboard"
+      },
       {
         "command": "rexxFlow.showControlGraph",
         "category": "REXX Control Flow",
@@ -95,13 +101,14 @@
   },
   "scripts": {
     "lint": "node scripts/lint.js",
-    "syntax-check": "node --check extension.js && node --check lib/shared.js && node --check lib/host-analysis.js && node --check lib/host-analysis.test.js && node --check lib/webview.js && node --check lib/webview-render.js && node --check lib/webview-support.js && node --check parser.js && node --check extension.test.js && node --check extension.integration.test.js && node --check parser.test.js && node --check vscode-test/runTest.js && node --check vscode-test/index.js && node --check vscode-test/extension-host.js",
+    "syntax-check": "node --check extension.js && node --check lib/shared.js && node --check lib/host-analysis.js && node --check lib/host-analysis.test.js && node --check lib/webview.js && node --check lib/webview-render.js && node --check lib/webview-support.js && node --check lib/task-dashboard.js && node --check parser.js && node --check extension.test.js && node --check extension.integration.test.js && node --check parser.test.js && node --check scripts/release.js && node --check scripts/release.test.js && node --check vscode-test/runTest.js && node --check vscode-test/index.js && node --check vscode-test/extension-host.js",
     "smoke": "node --test extension.integration.test.js",
     "test:vscode": "node vscode-test/runTest.js",
     "test": "node --test",
     "verify": "npm run lint && npm run syntax-check && npm run smoke && npm test",
     "verify:full": "npm run verify && npm run test:vscode",
-    "package:vsix": "npx --yes @vscode/vsce package"
+    "package:vsix": "npx --yes @vscode/vsce package",
+    "release": "node scripts/release.js"
   },
   "files": [
     "extension.js",

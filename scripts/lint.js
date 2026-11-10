@@ -12,8 +12,11 @@ const files = [
   path.join("lib", "webview.js"),
   path.join("lib", "webview-render.js"),
   path.join("lib", "webview-support.js"),
+  path.join("lib", "task-dashboard.js"),
   "parser.test.js",
   path.join("scripts", "lint.js"),
+  path.join("scripts", "release.js"),
+  path.join("scripts", "release.test.js"),
   path.join("vscode-test", "runTest.js"),
   path.join("vscode-test", "index.js"),
   path.join("vscode-test", "extension-host.js")

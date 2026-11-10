@@ -5,12 +5,15 @@ const path = require("node:path");
 const { parseRexxControlFlow, toDot, toExcalidraw } = require("./parser");
 const {
   normalizePersistedGraphState,
+  normalizeTaskDashboardState,
   createNonce,
   createGraphWebviewOptions,
   buildWebviewCsp,
-  normalizeGraphWebviewMessage
+  normalizeGraphWebviewMessage,
+  normalizeTaskDashboardMessage
 } = require("./lib/shared");
 const { renderGraphHtml, sanitizeCss, nodeCategoryForKind } = require("./lib/webview");
+const { renderTaskDashboardHtml } = require("./lib/task-dashboard");
 const {
   buildDiagnosticsForGraph,
   buildWorkspaceGraph,
@@ -21,9 +24,11 @@ const {
 const SUPPORTED_LANGS = new Set(["rexx", "REXX"]);
 const MAX_CUSTOM_CSS_BYTES = 64 * 1024;
 const MAX_UI_ERROR_CHARS = 180;
+const TASK_DASHBOARD_STATE_KEY = "rexxFlow.taskDashboard";
 function activate(context) {
   const sessions = new Map();
   const graphCache = new Map();
+  let taskDashboardSession = null;
   let cssWarningKey = null;
   const MAX_GRAPH_CACHE_ENTRIES = 8;
 
@@ -203,6 +208,17 @@ function activate(context) {
     await context.workspaceState.update(session.persistenceKey, session.persistedState);
   };
 
+  const readTaskDashboardState = () =>
+    normalizeTaskDashboardState(context.workspaceState?.get(TASK_DASHBOARD_STATE_KEY, {}) || {});
+
+  const persistTaskDashboardState = async (session, state) => {
+    if (!session || !context.workspaceState?.update) {
+      return;
+    }
+    session.state = normalizeTaskDashboardState(state);
+    await context.workspaceState.update(TASK_DASHBOARD_STATE_KEY, session.state);
+  };
+
   const diagnosticCollection = vscode.languages?.createDiagnosticCollection
     ? vscode.languages.createDiagnosticCollection("rexxFlow")
     : null;
@@ -340,7 +356,7 @@ function activate(context) {
           targetUri = vscode.Uri.parse(message.uri);
         }
         const docTarget = await vscode.workspace.openTextDocument(targetUri);
-        const line = Math.min(docTarget.lineCount - 1, message.line);
+        const line = Math.min(docTarget.lineCount, message.line);
         const editor = await vscode.window.showTextDocument(docTarget, vscode.ViewColumn.One);
         const position = new vscode.Position(line - 1, 0);
         const range = new vscode.Range(position, position);
@@ -459,6 +475,63 @@ function activate(context) {
       await handleSessionMessage(session, message);
     });
     sessions.set(key, session);
+    return session;
+  };
+
+  const renderTaskDashboardSession = (session) => {
+    if (!session?.panel) {
+      return;
+    }
+    session.panel.title = "REXX Control Flow: Task Dashboard";
+    session.panel.webview.html = renderTaskDashboardHtml(session.state || {}, createNonce());
+  };
+
+  const handleTaskDashboardMessage = async (session, message) => {
+    if (!message) {
+      return;
+    }
+
+    if (message.type === "persistTaskDashboardState") {
+      await persistTaskDashboardState(session, message.state);
+      return;
+    }
+
+    if (message.type === "copyTaskRequest") {
+      await vscode.env?.clipboard?.writeText?.(message.text);
+      if (typeof vscode.window.showInformationMessage === "function") {
+        vscode.window.showInformationMessage("REXX Control Flow: Task request copied to clipboard.");
+      }
+    }
+  };
+
+  const createTaskDashboardSession = () => {
+    if (taskDashboardSession?.panel) {
+      return taskDashboardSession;
+    }
+
+    const session = {
+      state: readTaskDashboardState(),
+      panel: vscode.window.createWebviewPanel(
+        "rexxTaskDashboard",
+        "REXX Control Flow: Task Dashboard",
+        vscode.ViewColumn.Beside,
+        createGraphWebviewOptions()
+      )
+    };
+
+    session.panel.onDidDispose(() => {
+      taskDashboardSession = null;
+    });
+
+    session.panel.webview.onDidReceiveMessage(async (rawMessage) => {
+      const message = normalizeTaskDashboardMessage(rawMessage);
+      if (!message) {
+        return;
+      }
+      await handleTaskDashboardMessage(session, message);
+    });
+
+    taskDashboardSession = session;
     return session;
   };
 
@@ -678,6 +751,15 @@ function activate(context) {
     () => renderWorkspaceGraph()
   );
 
+  const showTaskDashboard = vscode.commands.registerCommand("rexxFlow.openTaskDashboard", () => {
+    const session = createTaskDashboardSession();
+    session.state = readTaskDashboardState();
+    if (session.panel.visible === false) {
+      session.panel.reveal(vscode.ViewColumn.Beside, false);
+    }
+    renderTaskDashboardSession(session);
+  });
+
   const exportJson = vscode.commands.registerCommand("rexxFlow.exportGraphJson", () =>
     withSupportedActiveDocument("Open a REXX file to export control flow.", (doc) =>
       runWithErrorMessage(`Unable to export JSON for "${path.basename(doc.fileName)}".`, () =>
@@ -827,6 +909,7 @@ function activate(context) {
     ...[
       show,
       showWorkspace,
+      showTaskDashboard,
       exportJson,
       exportDot,
       exportExcalidraw,
@@ -862,6 +945,9 @@ module.exports = {
   createNonce,
   nodeCategoryForKind,
   normalizeGraphWebviewMessage,
+  normalizeTaskDashboardMessage,
+  normalizeTaskDashboardState,
   renderGraphHtml,
+  renderTaskDashboardHtml,
   sanitizeCss
 };

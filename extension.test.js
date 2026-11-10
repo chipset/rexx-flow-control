@@ -15,7 +15,10 @@ const {
   createGraphWebviewOptions,
   nodeCategoryForKind,
   normalizeGraphWebviewMessage,
+  normalizeTaskDashboardMessage,
+  normalizeTaskDashboardState,
   renderGraphHtml,
+  renderTaskDashboardHtml,
   sanitizeCss
 } = require('./extension');
 
@@ -93,6 +96,94 @@ test('normalizes allowed webview messages and rejects invalid ones', () => {
   );
 });
 
+test('normalizes task dashboard state and filters invalid task data', () => {
+  assert.deepEqual(
+    normalizeTaskDashboardState({
+      tasks: [
+        {
+          id: 'task-1',
+          title: 'Ship dashboard',
+          notes: 'Need request composer',
+          status: 'in-progress',
+          priority: 'high',
+          tags: ['ui', 'codex']
+        },
+        {
+          id: 'task-2',
+          title: '',
+          status: 'todo',
+          priority: 'medium'
+        }
+      ],
+      selectedTaskIds: ['task-1', 'missing'],
+      instruction: 'Implement the selected tasks',
+      query: 'ship',
+      statusFilter: 'in-progress'
+    }),
+    {
+      tasks: [
+        {
+          id: 'task-1',
+          title: 'Ship dashboard',
+          notes: 'Need request composer',
+          status: 'in-progress',
+          priority: 'high',
+          tags: ['ui', 'codex'],
+          createdAt: '',
+          updatedAt: ''
+        }
+      ],
+      selectedTaskIds: ['task-1'],
+      instruction: 'Implement the selected tasks',
+      query: 'ship',
+      statusFilter: 'in-progress'
+    }
+  );
+});
+
+test('normalizes allowed task dashboard messages and rejects invalid ones', () => {
+  assert.deepEqual(
+    normalizeTaskDashboardMessage({
+      type: 'persistTaskDashboardState',
+      state: {
+        tasks: [{ id: 'task-1', title: 'Review parser', status: 'todo', priority: 'medium' }]
+      }
+    }),
+    {
+      type: 'persistTaskDashboardState',
+      state: {
+        tasks: [
+          {
+            id: 'task-1',
+            title: 'Review parser',
+            notes: '',
+            status: 'todo',
+            priority: 'medium',
+            tags: [],
+            createdAt: '',
+            updatedAt: ''
+          }
+        ],
+        selectedTaskIds: [],
+        instruction: '',
+        query: '',
+        statusFilter: 'all'
+      }
+    }
+  );
+  assert.deepEqual(
+    normalizeTaskDashboardMessage({
+      type: 'copyTaskRequest',
+      text: 'Use these tasks and implement them.'
+    }),
+    {
+      type: 'copyTaskRequest',
+      text: 'Use these tasks and implement them.'
+    }
+  );
+  assert.equal(normalizeTaskDashboardMessage({ type: 'copyTaskRequest', text: '' }), null);
+});
+
 test('sanitizes custom css so it cannot break out of the style tag', () => {
   assert.equal(sanitizeCss('</style><script>alert(1)</script>'), '<\\/style><script>alert(1)</script>');
 });
@@ -157,6 +248,7 @@ test('renders graph mode fit logic with movable nodes, pointer interactions, and
   assert.match(html, /window\.addEventListener\('blur'/);
   assert.match(html, /state\.nodePositions\.set\(nodeDrag\.id, next\)/);
   assert.match(html, /setSelected\(finished\.id\)/);
+  assert.match(html, /vscode\.postMessage\(\{ type: 'revealLine', line: fn\.line, uri: fn\.fileUri \}\)/);
   assert.match(html, /layoutData = applySavedNodePositions\(computeLayout\(\)\)/);
   assert.match(html, /function resetGraphView\(\) \{/);
   assert.match(html, /function exportPng\(\) \{/);
@@ -190,7 +282,8 @@ test('renders graph mode fit logic with movable nodes, pointer interactions, and
   assert.match(html, /const node = el\('div', \{/);
   assert.match(html, /role: 'button'/);
   assert.match(html, /tabindex: 0/);
-  assert.match(html, /if \(!state\.movementEnabled\) \{\s*setSelected\(fn\.id\);\s*return;\s*\}/);
+  assert.match(html, /if \(!state\.movementEnabled\) \{\s*return;\s*\}/);
+  assert.match(html, /onclick: \(event\) => \{\s*event\.stopPropagation\(\);\s*if \(suppressNodeClickId === fn\.id\) return;\s*setSelected\(fn\.id\);/);
   assert.match(html, /onkeydown: \(event\) => \{/);
   assert.match(html, /\.node\.uncalled/);
   assert.match(html, /const uncalled = !\['MAIN', 'WORKSPACE'\]\.includes\(fn\.id\) && \(REX\.IN_DEGREE\[fn\.id\] \|\| 0\) === 0;/);
@@ -204,6 +297,38 @@ test('renders graph mode fit logic with movable nodes, pointer interactions, and
   assert.match(html, /min-width: 0;/);
   assert.match(html, /oninput: \(event\) => \{ state\.search = event\.target\.value; renderGraphOnly\(\); \}/);
   assert.doesNotMatch(html, /oninput: \(event\) => \{ state\.search = event\.target\.value; render\(\); \}/);
+});
+
+test('renders a task dashboard with request drafting controls', () => {
+  const html = renderTaskDashboardHtml(
+    {
+      tasks: [
+        {
+          id: 'task-1',
+          title: 'Review graph filters',
+          notes: 'Check edge categories',
+          status: 'todo',
+          priority: 'high',
+          tags: ['ui'],
+          createdAt: '',
+          updatedAt: ''
+        }
+      ],
+      selectedTaskIds: ['task-1'],
+      instruction: 'Implement the highest priority item.',
+      query: '',
+      statusFilter: 'all'
+    },
+    'nonce123'
+  );
+
+  assert.match(html, /Task Radar/);
+  assert.match(html, /Add to dashboard/);
+  assert.match(html, /Copy request/);
+  assert.match(html, /type: 'persistTaskDashboardState'/);
+  assert.match(html, /type: 'copyTaskRequest'/);
+  assert.match(html, /Use my dashboard tasks as context/);
+  assert.match(html, /Review graph filters/);
 });
 
 test('adapts graph data into the new module sidebar and inspector view', () => {
